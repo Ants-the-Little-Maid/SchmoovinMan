@@ -1,0 +1,32 @@
+## Interface: 16001
+## Title: Schmoovin Man
+## Notes: Endless runner minigame: a Tauren auto-runs through Kalimdor and beyond. Dodge, jump, duck, fly and grab tokens.
+## Version: @project-version@
+## Author: Ants
+## X-License: MIT
+## IconTexture: Interface\Icons\Ability_Mount_Kodo_01
+## SavedVariables: SchmoovinManDB
+
+Templates.xml
+Data\Tuning.lua
+Data\Assets.lua
+Data\Zones.lua
+Game\Random.lua
+Game\Rules.lua
+Game\Patterns.lua
+Game\Runner.lua
+Game\World.lua
+Social\Codec.lua
+Core.lua
+Social\Scores.lua
+Social\GuildBoard.lua
+Render\Scene.lua
+Render\Ground.lua
+Render\Renderer.lua
+UI\Widgets.lua
+UI\Window.lua
+UI\Hud.lua
+UI\Bubble.lua
+UI\Screens.lua
+UI\Controller.lua
+Minimap.lua
