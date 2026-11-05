@@ -233,10 +233,28 @@ local waiting = C.renderer:NewRecord({ { fileID = 123456789 } }, "jogger")
 rawset(waiting.actor, "IsGeoReady", function() return false end)
 C.renderer:CheckLoaded(waiting)
 assert(not waiting.ready and not C.renderer.bounds["f123456789"], "measured a model before its geometry was ready")
-rawset(waiting.actor, "IsGeoReady", function() return true end)
+-- In Forever the signal can stay false forever for props: after a short wait
+-- the model must be measured and shown anyway, never dropped as failed.
+clock = clock + 1.5
 C.renderer:CheckLoaded(waiting)
-assert(waiting.ready, "model not measured once its geometry was ready")
+assert(waiting.ready and not waiting.failed, "model stuck invisible while its geometry signal stayed false")
 C.renderer:FreeRecord(waiting)
+-- Copies of one model failing together are reported once.
+C.renderer:TakeFailures()
+local copies = {}
+for index = 1, 3 do
+	copies[index] = C.renderer:NewRecord({ { fileID = 987654321 } }, "low")
+	rawset(copies[index].actor, "IsLoaded", function() return false end)
+end
+clock = clock + 11
+for _, copy in ipairs(copies) do
+	C.renderer:CheckLoaded(copy)
+end
+local failed = C.renderer:TakeFailures()
+assert(#failed == 1 and failed[1] == "f987654321", "failure reported more than once: " .. table.concat(failed, ", "))
+for _, copy in ipairs(copies) do
+	C.renderer:FreeRecord(copy)
+end
 
 -- Settings changed mid-run wait for the next run.
 C:StartRun()

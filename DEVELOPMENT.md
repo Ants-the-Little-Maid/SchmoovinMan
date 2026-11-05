@@ -2,7 +2,7 @@
 
 How the addon is built, what was checked, and why things are the way they are. The player-facing overview is [README.md](README.md); version history is [CHANGELOG.md](CHANGELOG.md).
 
-**Status:** version 0.7.1 (2026-11-06). Models wait for `IsGeoReady`; characters are measured by their active box with scale kept between 0.5 and 2.0, after a tester saw a tiny runner on a first run. Playtests have covered up to 0.5.0, plus the tiny-runner report on 0.7.0; later versions haven't been seen in game yet.
+**Status:** version 0.7.2 (2026-11-06). `IsGeoReady` is only waited on for 1 second when it explicitly returns false: in Forever it never turns true for props loaded by file ID, and waiting on it in 0.7.1 hid them. Characters are measured by their active box with scale kept between 0.5 and 2.0, after a tester saw a tiny runner. Playtests have covered up to 0.5.0, plus reports on 0.7.0 and 0.7.1; 0.7.2 hasn't been seen in game yet.
 
 ## Running the tests
 

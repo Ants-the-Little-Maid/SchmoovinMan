@@ -13,6 +13,8 @@ local Scene = ns.Scene
 -- Seconds to wait for a model before trying the next one. Generous, because a
 -- first visit streams models in slowly; giving up early swapped in backups.
 local LOAD_TIMEOUT = 10
+-- Longest wait for the geometry-ready signal before measuring anyway.
+local GEO_WAIT = 1
 
 -- Characters and creatures: measured by the active box only, and their scale
 -- kept within a sane range (they're about life size at scale 1).
@@ -110,8 +112,11 @@ function Renderer:LoadCandidate(record)
 end
 
 function Renderer:MarkBad(record)
-	self.badModels[record.key] = true
-	tinsert(self.failures, record.key)
+	-- Several copies of one model can fail together; report each model once.
+	if not self.badModels[record.key] then
+		self.badModels[record.key] = true
+		tinsert(self.failures, record.key)
+	end
 	record.index = record.index + 1
 	self:LoadCandidate(record)
 end
@@ -122,12 +127,13 @@ function Renderer:CheckLoaded(record)
 		return
 	end
 	local actor = record.actor
-	-- Wait for the geometry too: before it streams in, the reported size can be
-	-- a placeholder, and the first reading is cached for the whole session.
-	-- Only an explicit false means "not yet"; a missing method or nil reply
-	-- mustn't block loading forever.
-	local geoReady = not actor.IsGeoReady or actor:IsGeoReady() ~= false
-	if actor:IsLoaded() and geoReady then
+	if actor:IsLoaded() then
+		-- When the game says the geometry isn't ready, wait briefly so the size
+		-- isn't read from a placeholder. Only briefly: in Forever this never
+		-- turns true for props loaded by file, and waiting on it hid them.
+		if actor.IsGeoReady and actor:IsGeoReady() == false and GetTime() - record.startedAt < GEO_WAIT then
+			return
+		end
 		local minX, minY, minZ, maxX, maxY, maxZ = Scene.GetActorBounds(actor, CHARACTER[record.role])
 		if minX and (maxZ - minZ) > 0.01 then
 			self.bounds[record.key] = { minX, minY, minZ, maxX, maxY, maxZ }

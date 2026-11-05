@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.2 (2026-11-06)
+
+- Fixed invisible hazards, coins and scenery introduced in 0.7.1: models waited for a "geometry ready" signal that Forever never sends for props, so they stayed hidden (while hazards could still hit you) and were then reported as failed. Models now show as soon as they load; that signal only causes a 1-second wait.
+- The runner's usual appearances load again instead of falling back to the Orgrimmar Brave.
+- A model that fails to load is reported once, not once per copy.
+
 ## 0.7.1 (2026-11-06)
 
 - Fixed the runner (and joggers) sometimes showing tiny, seen by a player on a first run:
