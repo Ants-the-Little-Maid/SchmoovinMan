@@ -83,5 +83,8 @@ ns.Tuning = {
 		gem = 50,
 		perSecond = 10,
 		perSecondPerZone = 2,
+		-- For each obstacle in your path that you jump over or duck under.
+		jump = 2,
+		duck = 3,
 	},
 }

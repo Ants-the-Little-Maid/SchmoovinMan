@@ -288,6 +288,7 @@ for seed = 1, seedCount do
 			check("bot collects tokens", world.tokens > 50, world.tokens)
 			check("score includes time", world.score >= math.floor(world.timePoints), world.score)
 			check("zones advance", world.zoneIndex >= math.floor(minutes * 60 / Tuning.zoneLength), world.zoneIndex)
+			check("bot earns jump and duck points", world.movePoints > 0 and world.jumps > 0, world.movePoints)
 		end
 	end
 end
@@ -374,6 +375,80 @@ do
 		end
 	end
 	check("zone event fires", zoneEvent and zoneEvent.index == 2 and zoneEvent.key ~= "mulgore")
+end
+
+-- Jump and duck points ------------------------------------------------------------
+
+local function MoveWorld(seed)
+	local world = World.New(seed, Tuning)
+	world.cursor = 1e9
+	world:Step(0.05)
+	world:DrainEvents()
+	world.entities = {}
+	return world
+end
+
+local function RunFor(world, seconds, action, at)
+	local acted = false
+	local target = world.time + seconds
+	while world.time < target do
+		if action and not acted and world.time >= at then
+			world:Input(action)
+			acted = true
+		end
+		world:Step(Tuning.step)
+	end
+end
+
+do
+	local world = MoveWorld(21)
+	local arrive = world.time + 1.0
+	world:AddEntity("low", world.runner.lane, arrive, 0)
+	RunFor(world, 1.6, "jump", arrive - 0.35)
+	check("jumping a low obstacle scores 2", world.movePoints == 2 and world.jumps == 1 and not world.over, world.movePoints)
+	local cleared = false
+	for _, event in ipairs(world:DrainEvents()) do
+		if event.type == "cleared" and event.move == "jump" and event.points == 2 then
+			cleared = true
+		end
+	end
+	check("jump fires a cleared event", cleared)
+	check("score includes jump points", world.score == math.floor(world.tokenPoints + world.timePoints + world.movePoints), world.score)
+end
+
+do
+	local world = MoveWorld(22)
+	local arrive = world.time + 1.0
+	world:AddEntity("high", world.runner.lane, arrive, 0)
+	RunFor(world, 1.6, "duck", arrive - 0.25)
+	check("ducking a high bar scores 3", world.movePoints == 3 and world.ducks == 1 and not world.over, world.movePoints)
+end
+
+do
+	local world = MoveWorld(23)
+	local arrive = world.time + 1.0
+	local other = world.runner.lane == 1 and 3 or 1
+	world:AddEntity("low", other, arrive, 0)
+	RunFor(world, 1.6, "jump", arrive - 0.35)
+	check("jumping beside an obstacle scores nothing", world.movePoints == 0, world.movePoints)
+end
+
+do
+	local world = MoveWorld(24)
+	local arrive = world.time + 1.0
+	world:AddEntity("low", world.runner.lane, arrive, 0)
+	world.safeLeft = 5
+	RunFor(world, 1.6)
+	check("walking through while invulnerable scores nothing", world.movePoints == 0 and not world.over, world.movePoints)
+end
+
+do
+	local world = MoveWorld(25)
+	local arrive = world.time + 1.0
+	world:AddEntity("block", world.runner.lane, arrive, 0)
+	world.shield = true
+	RunFor(world, 1.6, "jump", arrive - 0.35)
+	check("blocks give no move points", world.movePoints == 0, world.movePoints)
 end
 
 -- Guild messages ----------------------------------------------------------------

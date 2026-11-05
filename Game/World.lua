@@ -13,7 +13,7 @@ API for the renderer and UI:
 Fields:
   time, speed (shown speed), distance (yards run, for scrolling the ground)
   zoneIndex, zoneKey, zoneStart (time the current zone began)
-  score, tokenPoints, timePoints, tokens, gems
+  score, tokenPoints, timePoints, movePoints, tokens, gems, jumps, ducks
   powerups = { windRider = left, magnet = left, goldRush = left, stampede = left }
   shield (bool), safeLeft (seconds of no-hit after a shield break or landing)
   runner = { lane, x, z, state, flying }   state: run | jump | duck | fly | crash
@@ -24,6 +24,7 @@ Fields:
 
 Events ({ type = ..., ... }):
   collect {role, points}, powerup {role}, expire {role}, zone {index, key, fromSpeed},
+  cleared {role, move, points} (jumped a low obstacle or ducked a high bar in your path),
   crash {role}, shieldBreak {role}, smash {role}, jump, duck, land, lane
 ]]
 
@@ -61,6 +62,7 @@ function World.New(seed, tuning, options)
 	self.stampedeBlend = 0
 
 	self.score, self.tokenPoints, self.timePoints = 0, 0, 0
+	self.movePoints, self.jumps, self.ducks = 0, 0, 0
 	self.tokens, self.gems = 0, 0
 	self.powerups = {}
 	self.shield = false
@@ -329,6 +331,44 @@ function World:Collect(entity)
 	self:Emit({ type = "collect", role = role, points = points })
 end
 
+-- Scores a jump or duck: while the obstacle passes through you, it must be in
+-- your path and you must be making its move (in the air for a low one,
+-- ducking for a high bar). Paid once it's behind you. Flying, smashing,
+-- being hit and invulnerable pass-throughs don't count.
+function World:CheckMove(entity, runner)
+	if entity.moveScored or entity.smashed or self.over then
+		return
+	end
+	local points, move = Rules.MovePoints(self.tuning, entity.role)
+	if not points then
+		return
+	end
+	local tuning = self.tuning
+	local shape = Rules.SHAPES[entity.role]
+	local reach = shape.halfDepth + tuning.runnerHalfDepth
+	if math.abs(entity.y) < reach then
+		local inPath = math.abs(entity.x - runner.x) < shape.halfWidth + tuning.runnerHalfWidth
+		local doing = (move == "jump" and runner.z > 0 and not runner.flying)
+			or (move == "duck" and runner.state == "duck")
+		if inPath and doing and self.safeLeft <= 0 then
+			entity.moveMade = true
+		elseif inPath then
+			entity.moveMissed = true
+		end
+	elseif entity.y <= -reach then
+		entity.moveScored = true
+		if entity.moveMade and not entity.moveMissed then
+			self.movePoints = self.movePoints + points
+			if move == "jump" then
+				self.jumps = self.jumps + 1
+			else
+				self.ducks = self.ducks + 1
+			end
+			self:Emit({ type = "cleared", role = entity.role, move = move, points = points })
+		end
+	end
+end
+
 function World:Tick(h)
 	local tuning = self.tuning
 	local runner = self.runner
@@ -374,6 +414,7 @@ function World:Tick(h)
 			if not self.over and Rules.HitsObstacle(tuning, entity.role, entity.x, entity.y, runner.x, runner.z, height) then
 				self:HitObstacle(entity)
 			end
+			self:CheckMove(entity, runner)
 		elseif not self.over then
 			if magnet and Rules.TOKEN[entity.role] and entity.y > 0 and entity.y < tuning.magnetRange then
 				entity.magnet = true
@@ -395,5 +436,5 @@ function World:Tick(h)
 	for index = kept + 1, count do
 		entities[index] = nil
 	end
-	self.score = Rules.Score(self.tokenPoints, self.timePoints)
+	self.score = Rules.Score(self.tokenPoints, self.timePoints, self.movePoints)
 end

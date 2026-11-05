@@ -2,7 +2,7 @@
 
 **An endless-runner minigame for World of Warcraft: Forever.** A Tauren auto-runs through Mulgore and on across Kalimdor and beyond. Dodge, jump, duck, fly and grab tokens. Each new zone speeds you up. How long can you keep schmoovin'?
 
-Open it with `/schmoove` or the kodo button on the minimap.
+Open it with `/schmoove` or the kodo button on the minimap. Right-click the button to jump straight into a run or change settings.
 
 ## Features
 
@@ -16,6 +16,7 @@ Open it with `/schmoove` or the kodo button on the minimap.
   - Gold Rush: double token points.
   - Stampede: smash through hazards.
 - **Joggers** of the Horde jog along the roadside. Overtake them and your Tauren has something to say. Fellow Tauren have something to say back.
+- **Scoring**: points for tokens, for time survived, and for style: +2 for every obstacle you jump over and +3 for every bar you duck under.
 - **Scores**: a personal top 10 shared across your characters, plus a guild board with guildmates who have the addon.
 - **Your pace**: zones last 15, 25, 35 or 45 seconds, and the window comes in four sizes.
 
@@ -38,6 +39,7 @@ You can't start a run in combat, and entering combat pauses the run. Only the ga
 | Command | What it does |
 |---|---|
 | `/schmoove` | Open or close the game |
+| `/schmoove start` | Open the game straight into a run |
 | `/schmoove zones 15`, `25`, `35` or `45` | Seconds per zone; shorter is harder |
 | `/schmoove duck` | Turn ducking off (high bars become blocks) or back on |
 | `/schmoove sound` | Turn sound on or off |

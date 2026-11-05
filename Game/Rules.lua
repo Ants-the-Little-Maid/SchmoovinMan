@@ -94,6 +94,17 @@ function Rules.Touches(ex, ey, ez, runnerX, runnerZ, runnerHeight)
 	return ez > runnerZ - 0.6 and ez < runnerZ + runnerHeight + 0.6
 end
 
-function Rules.Score(tokenPoints, timePoints)
-	return math.floor(tokenPoints + timePoints)
+function Rules.Score(tokenPoints, timePoints, movePoints)
+	return math.floor(tokenPoints + timePoints + (movePoints or 0))
+end
+
+-- Points for getting past an obstacle in your path with the move it asks for:
+-- jumping a low one or ducking a high bar. Others score nothing.
+function Rules.MovePoints(tuning, role)
+	if role == "low" then
+		return tuning.points.jump, "jump"
+	elseif role == "high" then
+		return tuning.points.duck, "duck"
+	end
+	return nil
 end

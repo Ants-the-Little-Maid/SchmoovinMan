@@ -224,6 +224,64 @@ SlashCmdList.SCHMOOVINMAN("sound")
 SlashCmdList.SCHMOOVINMAN("duck")
 SlashCmdList.SCHMOOVINMAN("nonsense")
 
+-- Minimap right-click menu, through a stub of the game's MenuUtil.
+local function Description()
+	local d = { items = {} }
+	local function add(kind, text, a, b)
+		local item = { kind = kind, text = text, a = a, b = b, sub = Description() }
+		table.insert(d.items, item)
+		return item.sub
+	end
+	function d:CreateTitle(text) return add("title", text) end
+	function d:CreateButton(text, callback) return add("button", text, callback) end
+	function d:CreateRadio(text, isSelected, setSelected) return add("radio", text, isSelected, setSelected) end
+	function d:CreateCheckbox(text, isSelected, setSelected) return add("checkbox", text, isSelected, setSelected) end
+	function d:CreateDivider() return add("divider") end
+	return d
+end
+local function Find(d, text)
+	for _, item in ipairs(d.items) do
+		if item.text == text then return item end
+		local found = Find(item.sub, text)
+		if found then return found end
+	end
+end
+local menuRoot
+MenuUtil = { CreateContextMenu = function(owner, generator) menuRoot = Description(); generator(owner, menuRoot) end }
+local mini = _G.SchmoovinManMinimapButton
+C.frame:Hide()
+C.state = "closed"
+mini.scripts.OnClick(mini, "RightButton")
+assert(menuRoot and Find(menuRoot, "Start a run"), "right-click menu missing Start a run")
+Find(menuRoot, "Start a run").a()
+assert(C.frame.shown and C.state == "running", "quick start didn't open straight into a run")
+local zone15 = Find(menuRoot, "15 s (Frantic)")
+local liveZone = C.world.tuning.zoneLength
+zone15.b()
+assert(ns.Tuning.zoneLength == 15 and zone15.a(), "menu zone length didn't apply")
+assert(C.world.tuning.zoneLength == liveZone, "menu zone length reached the live run")
+Find(menuRoot, "Large").b()
+assert(ns.db.settings.windowSize == "large", "menu window size didn't apply")
+local duck = Find(menuRoot, "Ducking")
+local before = duck.a()
+duck.b()
+assert(duck.a() ~= before, "menu ducking checkbox didn't toggle")
+local sound = Find(menuRoot, "Sound")
+local soundBefore = sound.a()
+sound.b()
+assert(sound.a() ~= soundBefore, "menu sound checkbox didn't toggle")
+-- Quick start with a paused run brings it back instead of starting over.
+C:Pause("")
+local pausedWorld = C.world
+C.frame:Hide()
+C:QuickStart()
+assert(C.world == pausedWorld and C.state == "paused", "quick start threw away a paused run")
+-- Without a menu system, right-click still quick-starts.
+MenuUtil = nil
+C:QuitRun()
+mini.scripts.OnClick(mini, "RightButton")
+assert(C.state == "running", "right-click fallback didn't start a run")
+
 -- The runner is sized from its active box (2 yards tall in the stub), not the
 -- larger max box, and stays inside the sane character scale range.
 local runnerScale = C.renderer:Fit(C.renderer.runner)

@@ -98,6 +98,26 @@ function Controller:SetWindowSize(key)
 	self.scene:Calibrate()
 end
 
+-- Quick launch from the minimap menu or /schmoove start: open the window
+-- straight into a new run. A paused run is brought back rather than lost.
+function Controller:QuickStart()
+	self:Build()
+	if not self.frame:IsShown() then
+		self.frame:Show()
+	end
+	if self.state == "paused" or self.state == "running" then
+		return
+	end
+	self:StartRun()
+end
+
+-- Redraws the start screen after a setting changes, if it's showing.
+function Controller:RefreshStart()
+	if self.screens and self.state == "start" then
+		self.screens:ShowStart(ns.Scores.Best(), ns.GuildBoard.TopScore())
+	end
+end
+
 function Controller:Close()
 	if self.frame then
 		self.frame:Hide()

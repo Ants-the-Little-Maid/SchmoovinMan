@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0 (2026-11-06)
+
+- Jump and duck points: +2 for every obstacle you jump over and +3 for every bar you duck under, when it's in your path. Shown on the game-over screen as "Jumps and ducks".
+- Right-click the minimap button for a menu:
+  - **Start a run**: opens the game straight into a run, or brings back a paused one.
+  - Zone length, window size, ducking and sound.
+- `/schmoove start` does the same quick launch.
+
 ## 0.7.2 (2026-11-06)
 
 - Fixed invisible hazards, coins and scenery introduced in 0.7.1: models waited for a "geometry ready" signal that Forever never sends for props, so they stayed hidden (while hazards could still hit you) and were then reported as failed. Models now show as soon as they load; that signal only causes a 1-second wait.

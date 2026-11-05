@@ -150,7 +150,7 @@ function Screens:BuildStart(layer)
 
 	local footnote = UI.Text(start, 12, C.subText)
 	footnote:SetPoint("TOPLEFT", powerups, "BOTTOMLEFT", 0, -10)
-	footnote:SetText("Each new zone speeds you up. Score = token points + time survived.")
+	footnote:SetText("Each new zone speeds you up. Score = tokens + time + jumps (+2) and ducks (+3).")
 	self.footnote = footnote
 end
 
@@ -276,21 +276,24 @@ function Screens:BuildGameOver(layer)
 	self.tokenLabel, self.tokenValue = Row(results)
 	self.tokenLabel:SetPoint("TOPLEFT", 22, -158)
 	self.tokenValue:SetPoint("TOPRIGHT", -22, -158)
+	self.moveLabel, self.moveValue = Row(results)
+	self.moveLabel:SetPoint("TOPLEFT", 22, -184)
+	self.moveValue:SetPoint("TOPRIGHT", -22, -184)
 	local totalLabel
 	totalLabel, self.totalValue = Row(results, "Total", "", 20)
 	totalLabel:SetTextColor(UI.Hex(C.gold))
 	self.totalValue:SetTextColor(UI.Hex(C.gold))
-	totalLabel:SetPoint("TOPLEFT", 22, -186)
-	self.totalValue:SetPoint("TOPRIGHT", -22, -186)
+	totalLabel:SetPoint("TOPLEFT", 22, -212)
+	self.totalValue:SetPoint("TOPRIGHT", -22, -212)
 
 	local bottom = results:CreateTexture(nil, "ARTWORK")
 	bottom:SetColorTexture(UI.Hex(C.divider))
 	bottom:SetHeight(1)
-	bottom:SetPoint("TOPLEFT", 22, -218)
-	bottom:SetPoint("TOPRIGHT", -22, -218)
+	bottom:SetPoint("TOPLEFT", 22, -244)
+	bottom:SetPoint("TOPRIGHT", -22, -244)
 
 	self.personalBadge = UI.Panel(results, "2f4a1a", 1, C.green)
-	self.personalBadge:SetPoint("TOPLEFT", 22, -232)
+	self.personalBadge:SetPoint("TOPLEFT", 22, -258)
 	self.personalBadge:SetSize(110, 24)
 	self.personalText = UI.Text(self.personalBadge, 13, "d8f2b0")
 	self.personalText:SetPoint("CENTER")
@@ -438,6 +441,8 @@ function Screens:ShowGameOver(world, entry, personalRank, guildRank, isBest)
 	local gemText = world.gems > 0 and string.format(" (%d gem%s)", world.gems, world.gems == 1 and "" or "s") or ""
 	self.tokenLabel:SetText(string.format("Tokens %s%s", UI.FormatNumber(world.tokens), gemText))
 	self.tokenValue:SetText(UI.FormatNumber(world.tokenPoints))
+	self.moveLabel:SetText(string.format("Jumps %d, ducks %d", world.jumps or 0, world.ducks or 0))
+	self.moveValue:SetText(UI.FormatNumber(world.movePoints or 0))
 	self.totalValue:SetText(UI.FormatNumber(world.score))
 
 	self.personalBadge:SetShown(personalRank ~= nil)

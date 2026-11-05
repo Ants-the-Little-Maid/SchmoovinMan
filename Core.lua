@@ -123,28 +123,48 @@ end
 local function PrintHelp()
 	ns.Print("Commands:")
 	print("  /schmoove - open or close the game")
+	print("  /schmoove start - open the game straight into a run")
 	print("  /schmoove sound - turn sound on or off")
 	print("  /schmoove duck - turn ducking on or off (off swaps high bars for blocks)")
 	print("  /schmoove zones 15|25|35|45 - seconds per zone (shorter is harder)")
 end
 
+-- Setting changes shared by the slash commands and the minimap menu.
+function ns.SetSound(enabled)
+	ns.db.settings.sound = enabled and true or false
+end
+
+-- Ducking applies from the next run; the running one keeps its own copy.
+function ns.SetDuck(enabled)
+	ns.db.settings.duck = enabled and true or false
+	ns.Tuning.duckEnabled = ns.db.settings.duck
+	ns.Controller:RefreshStart()
+end
+
+-- Zone length also applies from the next run.
+function ns.ChooseZoneLength(seconds)
+	local choice = ns.SetZoneLength(seconds)
+	ns.Controller:RefreshStart()
+	return choice
+end
+
 ns.commands["sound"] = function()
-	ns.db.settings.sound = not ns.db.settings.sound
+	ns.SetSound(not ns.db.settings.sound)
 	ns.Print("Sound " .. (ns.db.settings.sound and "on." or "off."))
 end
 
 ns.commands["duck"] = function()
-	ns.db.settings.duck = not ns.db.settings.duck
-	ns.Tuning.duckEnabled = ns.db.settings.duck
+	ns.SetDuck(not ns.db.settings.duck)
 	ns.Print("Ducking " .. (ns.db.settings.duck and "on" or "off") .. ". Takes effect from your next run.")
 end
 
 ns.commands["zones"] = function(rest)
-	local choice = ns.SetZoneLength(rest)
+	local choice = ns.ChooseZoneLength(rest)
 	ns.Print(("Zones last %d seconds (%s). Takes effect from your next run."):format(choice.seconds, choice.name))
-	if ns.Controller.screens and ns.Controller.state == "start" then
-		ns.Controller.screens:UpdateZoneButton()
-	end
+end
+
+ns.commands["start"] = function()
+	ns.Controller:QuickStart()
 end
 
 ns.commands["help"] = PrintHelp

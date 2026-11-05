@@ -2,7 +2,7 @@
 
 How the addon is built, what was checked, and why things are the way they are. The player-facing overview is [README.md](README.md); version history is [CHANGELOG.md](CHANGELOG.md).
 
-**Status:** version 0.7.2 (2026-11-06). `IsGeoReady` is only waited on for 1 second when it explicitly returns false: in Forever it never turns true for props loaded by file ID, and waiting on it in 0.7.1 hid them. Characters are measured by their active box with scale kept between 0.5 and 2.0, after a tester saw a tiny runner. Playtests have covered up to 0.5.0, plus reports on 0.7.0 and 0.7.1; 0.7.2 hasn't been seen in game yet.
+**Status:** version 0.8.0 (2026-11-06): jump (+2) and duck (+3) points, scored in `World:CheckMove` only when the obstacle is in your path and you make its move; a minimap right-click menu built with `MenuUtil.CreateContextMenu`. From 0.7.2: `IsGeoReady` is only waited on for 1 second when it explicitly returns false: in Forever it never turns true for props loaded by file ID, and waiting on it in 0.7.1 hid them. Characters are measured by their active box with scale kept between 0.5 and 2.0, after a tester saw a tiny runner. Playtests have covered up to 0.5.0, plus reports on 0.7.0 and 0.7.1; 0.7.2 hasn't been seen in game yet.
 
 ## Running the tests
 
@@ -98,6 +98,7 @@ Only these keys are kept from the rest of WoW while a run is live; anything else
 | Obstacles | Low (jump), high bar on two posts (duck, from zone 2), block, two-lane wall (from zone 2), charging creature (from zone 3), combos from zone 4 |
 | Tokens | Gold coins 10 points, gems 50. Lines, jump arcs and sky lines while flying |
 | Time points | 10 per second, plus 2 per second for each zone reached |
+| Move points | +2 per low obstacle jumped and +3 per high bar ducked, when it's in your path and you make the move. Flying, Stampede smashes, shield hits and invulnerable pass-throughs don't count |
 | Joggers | Orcs, Trolls and Tauren of both body types jog along either side of the road at 45% of your speed, one every 30-70 yards. They're scenery: they never block you |
 | Speech bubbles | Passing an orc or troll, your Tauren says something for 2.2 seconds, over its own head: "On your left!" or "On your right!" (matching the jogger's side) half the time, otherwise a line such as "OUTTA MY WAY I GOTTA SCHMOOVE". Passing a fellow Tauren, your Tauren compliments them a few yards before reaching them ("Hey Schmoover!", "Lookin' schmoove!"...), and they reply over their own head a moment later ("SCHMOOVIN GOOD!", "Could it be? The Schmoover!?"...). The compliment and reply lists are only used with Tauren. All lines are in `Data/Assets.lua` under `quips` |
 | Power-ups | Wind Rider (fly over everything, 8 s), Magnet (10 s), Thick Hide (absorbs one hit), Gold Rush (tokens x2, 12 s), Stampede (smash through, 5 s, from zone 3) |
