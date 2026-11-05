@@ -165,6 +165,11 @@ for _, line in ipairs(ns.Assets.quips.taurenReply) do taurenLines[line] = true; 
 C:HideBubbles()
 C.nextQuip = 0
 local r = C.renderer
+-- Clear the roadside first, so no randomly spawned jogger is passed during the check.
+for _, record in ipairs(r.joggers) do
+	r:FreeRecord(record)
+end
+r.joggers, r.passes, r.joggerNext = {}, {}, 1e9
 local tauren = r:NewRecord(ns.Assets.joggers[5], "jogger")
 tauren.race, tauren.side, tauren.x, tauren.y = "tauren", 1, 5, 12
 table.insert(r.joggers, tauren)
