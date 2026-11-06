@@ -18,7 +18,7 @@ local GEO_WAIT = 1
 
 -- Characters and creatures: measured by the active box only, and their scale
 -- kept within a sane range (they're about life size at scale 1).
-local CHARACTER = { runner = true, jogger = true, charger = true, windRider = true }
+local CHARACTER = { runner = true, jogger = true, alliance = true, charger = true, windRider = true }
 local CHARACTER_SCALE_MIN, CHARACTER_SCALE_MAX = 0.5, 2.0
 -- Posts that hold up high bars: plain fence posts, then a Tauren totem.
 local POSTS = {
@@ -27,8 +27,9 @@ local POSTS = {
 	{ fileID = 200577 }, -- generic/tauren/passive doodads/totems/taurentotem01.m2
 }
 
--- Yards ahead of a Tauren jogger at which you compliment them.
-local TAUREN_CALL_DISTANCE = 9
+-- Yards ahead of a jogger who answers back (Tauren, famous faces) at which
+-- the runner speaks, so their reply stays on screen.
+local CALL_DISTANCE = 9
 -- Chase camera: how far ahead it looks, its distance from that point and its tilt.
 -- Aimed so the runner sits a little below centre at the same zoom as 0.2.0.
 local CAMERA = { lookAhead = 4, distance = 16, pitch = math.rad(20), height = 1.6 }
@@ -183,7 +184,7 @@ function Renderer:Fit(record)
 		scale = Assets.runnerHeight / sizeZ
 	elseif role == "post" then
 		scale = (TARGET.high.lift + TARGET.high.height) / sizeZ
-	elseif role == "jogger" then
+	elseif role == "jogger" or role == "alliance" then
 		scale = Assets.joggerHeight / sizeZ
 	elseif role == "windRider" then
 		scale = Assets.windRiderLength / math.max(sizeX, sizeY)
@@ -256,6 +257,8 @@ function Renderer:ListFor(entity, zone)
 		return Assets.powerups[role]
 	elseif role == "charger" then
 		return zone.charger
+	elseif role == "alliance" then
+		return Assets.alliance[math.random(#Assets.alliance)]
 	end
 	-- Zone models first, then the shared fallbacks.
 	local list = {}
@@ -346,9 +349,30 @@ function Renderer:DrawEntity(record, entity, far, now)
 			actor:SetAnimation(Assets.anims.creatureRun[1], nil, 1.4)
 			record.animated = true
 		end
+	elseif role == "alliance" then
+		-- Jogging away from you, like the roadside joggers.
+		yaw = HALF_PI
+		if not record.animated then
+			actor:SetAnimation(Assets.anims.run[1], nil, 0.9)
+			record.animated = true
+		end
 	end
-	local y = entity.y
-	if entity.smashed then
+	local x, y = entity.x, entity.y
+	if entity.knocked then
+		-- Bowled over: flung up and off the side of the road, tumbling.
+		record.knockedAt = record.knockedAt or now
+		local side = entity.x < -0.1 and -1 or entity.x > 0.1 and 1 or (entity.id % 2 == 0 and 1 or -1)
+		local t = now - record.knockedAt
+		x = x + side * 9 * t
+		y = y + 5 * t
+		z = z + 10 * t - 9 * t * t
+		pitch = t * 7
+		roll = side * t * 9
+		if t > 1.4 then
+			actor:SetAlpha(0)
+			return
+		end
+	elseif entity.smashed then
 		-- Knocked away: fly up and spin off.
 		record.smashedAt = record.smashedAt or now
 		local t = now - record.smashedAt
@@ -361,7 +385,7 @@ function Renderer:DrawEntity(record, entity, far, now)
 			return
 		end
 	end
-	self.scene:Place(actor, entity.x, y, z + zOffset, yaw, scale, pitch, roll, centerX, centerY)
+	self.scene:Place(actor, x, y, z + zOffset, yaw, scale, pitch, roll, centerX, centerY)
 	if record.posts then
 		self:DrawPosts(record, entity, y, Fade(y, far))
 	end
@@ -531,6 +555,9 @@ function Renderer:UpdateJoggers(world, zone, moved, now)
 		local record = self:NewRecord(list, "jogger")
 		if record then
 			record.race = list.race
+			record.name = list.name
+			record.lines = list.lines
+			record.replies = list.replies
 			record.side = math.random() < 0.5 and -1 or 1
 			record.x = record.side * (roadHalf + 1.0 + math.random() * 1.2)
 			record.y = far
@@ -542,9 +569,9 @@ function Renderer:UpdateJoggers(world, zone, moved, now)
 	for _, record in ipairs(self.joggers) do
 		local before = record.y
 		record.y = record.y - moved * relative
-		-- The exchange with a Tauren starts a little before you reach them, so
-		-- their reply stays on screen; for the rest you speak as you go by.
-		local callAt = record.race == "tauren" and TAUREN_CALL_DISTANCE or 0
+		-- An exchange (Tauren, famous faces) starts a little before you reach
+		-- them, so their reply stays on screen; for the rest you speak as you go by.
+		local callAt = (record.race == "tauren" or record.replies) and CALL_DISTANCE or 0
 		if before > callAt and record.y <= callAt and not record.passed then
 			record.passed = true
 			tinsert(self.passes, record)
@@ -571,7 +598,8 @@ function Renderer:UpdateJoggers(world, zone, moved, now)
 	self.joggers = keep
 end
 
--- Joggers overtaken since the last call (each has .side -1 or 1 and .race).
+-- Joggers overtaken since the last call (each has .side -1 or 1 and .race,
+-- and famous faces .name, .lines and .replies).
 function Renderer:TakePasses()
 	local passes = self.passes
 	self.passes = {}

@@ -6,7 +6,9 @@ Open it with `/schmoove` or the kodo button on the minimap. Right-click the butt
 
 ## Features
 
-- **A 3D run in its own window**, built from the game's own models and terrain: Mulgore, then The Barrens, Thousand Needles, Ashenvale, Burning Steppes, Silithus, Un'Goro Crater and Winterspring in a random order.
+- **A 3D run in its own window**, built from the game's own models and terrain. It starts in Mulgore, then visits 15 more in a random order:
+  - The wilds: The Barrens, Thousand Needles, Ashenvale, Burning Steppes, Silithus, Un'Goro Crater, Winterspring, Westfall and Moonglade.
+  - The capitals: Stormwind, Darnassus, Ironforge, Thunder Bluff, Orgrimmar and Undercity.
 - **Three lanes, five moves**: change lane, jump, duck, and power-ups that let you fly or smash through.
 - **Hazards that fit each zone**: logs, totems, ruin walls, bars to duck under, and charging kodos, devilsaurs and yetis.
 - **Five power-ups**:
@@ -15,8 +17,9 @@ Open it with `/schmoove` or the kodo button on the minimap. Right-click the butt
   - Thick Hide: survive one hit.
   - Gold Rush: double token points.
   - Stampede: smash through hazards.
-- **Joggers** of the Horde jog along the roadside. Overtake them and your Tauren has something to say. Fellow Tauren have something to say back.
-- **Scoring**: points for tokens, for time survived, and for style: +2 for every obstacle you jump over and +3 for every bar you duck under.
+- **Joggers** of the Horde jog along the roadside. Overtake them and your Tauren has something to say. Fellow Tauren have something to say back, and so do famous faces such as Thrall, Cairne, Vol'jin and Sylvanas.
+- **Alliance joggers** get in your lane. Run into them to knock them flying, with a one-liner from your Tauren. They never end your run, and you can jump over them if you'd rather.
+- **Scoring**: points for tokens, for time survived, and for style: +2 for every obstacle you jump over, +3 for every bar you duck under and +5 for every Alliance jogger you knock over.
 - **Scores**: a personal top 10 shared across your characters, plus a guild board with guildmates who have the addon.
 - **Your pace**: zones last 15, 25, 35 or 45 seconds, and the window comes in four sizes.
 

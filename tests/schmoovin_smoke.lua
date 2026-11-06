@@ -194,6 +194,44 @@ C.nextQuip = 0
 said = {}
 Frames(3)
 assert(said[1] and not taurenLines[said[1]], "orc jogger used a tauren line: " .. tostring(said[1]))
+-- A famous face gets their own line, then answers with their own reply.
+local famousList
+for _, list in ipairs(ns.Assets.joggers) do
+	if list.name == "Thrall" then
+		famousList = list
+	end
+end
+assert(famousList, "no Thrall jogger list")
+local famousLines, famousReplies = {}, {}
+for _, line in ipairs(famousList.lines) do famousLines[line] = true end
+for _, line in ipairs(famousList.replies) do famousReplies[line] = true end
+for _, record in ipairs(r.joggers) do
+	r:FreeRecord(record)
+end
+r.joggers, r.passes = {}, {}
+r.joggerNext = 1e9
+local thrall = r:NewRecord(famousList, "jogger")
+thrall.race, thrall.name, thrall.lines, thrall.replies = famousList.race, famousList.name, famousList.lines, famousList.replies
+thrall.side, thrall.x, thrall.y = 1, 5, 12
+table.insert(r.joggers, thrall)
+C:HideBubbles()
+C.nextQuip = 0
+said = {}
+Frames(3)
+assert(said[1] and famousLines[said[1]], "runner didn't use Thrall's lines: " .. tostring(said[1]))
+assert(said[2] and famousReplies[said[2]], "Thrall didn't reply: " .. tostring(said[2]))
+print("famous exchange: " .. said[1] .. " / " .. said[2])
+-- Running into an Alliance jogger knocks them over, with a line and points.
+local knockLines = {}
+for _, line in ipairs(ns.Assets.quips.knock) do knockLines[line] = true end
+C:HideBubbles()
+said = {}
+local knocksBefore = C.world.knocks
+C.world:AddEntity("alliance", C.world.runner.lane, C.world.time + 0.6, 0)
+Frames(2)
+assert(C.world.knocks == knocksBefore + 1, "Alliance jogger wasn't knocked")
+assert(said[1] and knockLines[said[1]], "no knock line: " .. tostring(said[1]))
+print("knock: " .. said[1])
 -- High bars get posts.
 local high = C.world:AddEntity("high", 2, C.world.time + 3, 0)
 Frames(0.2)
@@ -376,5 +414,16 @@ for _, entry in ipairs(ns.GuildBoard.List()) do
 end
 assert(ns.GuildBoard.RankFor(mine.score) == others + 1, "ranked against itself")
 UnitName = realName
+-- The guild badge only shows for this character's new best, not every run.
+C.screens.guildText.SetText = function(self, text) self.value = text end
+C:StartRun()
+C.world.score = 99999999
+C:EndRun()
+assert(C.screens.guildBadge.shown, "guild badge missing for a new best")
+assert(C.screens.guildText.value == "#1 in guild", "new best not ranked #1: " .. tostring(C.screens.guildText.value))
+C:StartRun()
+C.world.score = 1
+C:EndRun()
+assert(not C.screens.guildBadge.shown, "guild badge shown for a run that isn't this character's best")
 print("templates used: " .. table.concat((function() local t = {} for k in pairs(templatesUsed) do t[#t + 1] = k end table.sort(t) return t end)(), ", "))
 print(("smoke ok: %d scores, guild board %d, %d messages sent, best %s"):format(#ns.db.scores, #ns.GuildBoard.List(), #sent, tostring(ns.db.scores[1].score)))

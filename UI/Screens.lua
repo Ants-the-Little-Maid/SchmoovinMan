@@ -150,7 +150,10 @@ function Screens:BuildStart(layer)
 
 	local footnote = UI.Text(start, 12, C.subText)
 	footnote:SetPoint("TOPLEFT", powerups, "BOTTOMLEFT", 0, -10)
-	footnote:SetText("Each new zone speeds you up. Score = tokens + time + jumps (+2) and ducks (+3).")
+	-- Held to the panel's width, so the longer score line wraps.
+	footnote:SetPoint("RIGHT", powerups, "RIGHT")
+	footnote:SetJustifyH("LEFT")
+	footnote:SetText("Each new zone speeds you up. Score = tokens + time + jumps (+2), ducks (+3) and Alliance joggers knocked over (+5).")
 	self.footnote = footnote
 end
 
@@ -441,7 +444,7 @@ function Screens:ShowGameOver(world, entry, personalRank, guildRank, isBest)
 	local gemText = world.gems > 0 and string.format(" (%d gem%s)", world.gems, world.gems == 1 and "" or "s") or ""
 	self.tokenLabel:SetText(string.format("Tokens %s%s", UI.FormatNumber(world.tokens), gemText))
 	self.tokenValue:SetText(UI.FormatNumber(world.tokenPoints))
-	self.moveLabel:SetText(string.format("Jumps %d, ducks %d", world.jumps or 0, world.ducks or 0))
+	self.moveLabel:SetText(string.format("Jumps %d, ducks %d, knocks %d", world.jumps or 0, world.ducks or 0, world.knocks or 0))
 	self.moveValue:SetText(UI.FormatNumber(world.movePoints or 0))
 	self.totalValue:SetText(UI.FormatNumber(world.score))
 

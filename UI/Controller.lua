@@ -239,13 +239,16 @@ function Controller:EndRun()
 	local entry, rank, isBest = ns.Scores.Add(world)
 	-- Shared with the guild when it's this character's best, even if another
 	-- character holds the account's best.
+	-- The guild badge, like the personal one, only shows for a run that counts:
+	-- this character's new best, with the place it now holds on the board.
+	local guildRank
 	if entry == ns.GuildBoard.MyBest() then
 		ns.GuildBoard.ShareBest(entry)
+		guildRank = ns.GuildBoard.RankFor(world.score)
 	end
 	if isBest then
 		ns.PlaySound("newBest")
 	end
-	local guildRank = ns.GuildBoard.RankFor(world.score)
 	self.hud:SetShown(false)
 	self.screens:ShowGameOver(world, entry, rank, guildRank, isBest)
 	self.state = "over"
@@ -267,6 +270,9 @@ function Controller:HandleEvents(now)
 			ns.PlaySound("powerup")
 		elseif kind == "shieldBreak" then
 			ns.PlaySound("shieldBreak")
+		elseif kind == "knock" then
+			ns.PlaySound("knock")
+			self:SayKnock()
 		elseif kind == "crash" then
 			ns.PlaySound("crash")
 			self:HideBubbles()
@@ -318,6 +324,20 @@ end
 
 -- Speech bubble ------------------------------------------------------------------
 
+-- Knocking an Alliance jogger always gets a line, cutting off any chatter
+-- (and any reply still to come, since the runner has moved on).
+function Controller:SayKnock()
+	local world = self.world
+	local quips = ns.Assets.quips
+	local renderer = self.renderer
+	self.pendingReply = nil
+	self.replyBubble:Hide()
+	self.bubble:Say(quips.knock[math.random(#quips.knock)], world.time + quips.duration, function()
+		return renderer:RunnerHeadPoint(self.world)
+	end)
+	self.nextQuip = world.time + quips.duration + quips.gap
+end
+
 function Controller:HideBubbles()
 	self.bubble:Hide()
 	self.replyBubble:Hide()
@@ -344,9 +364,15 @@ function Controller:UpdateQuips()
 	local quiet = not self.bubble:IsShown() and not self.replyBubble:IsShown() and not self.pendingReply
 	if self.state == "running" and jogger and quiet and world.time >= (self.nextQuip or 0) then
 		local line
-		if jogger.race == "tauren" then
+		if jogger.lines then
+			-- A famous face: their own lines, and their own reply.
+			line = jogger.lines[math.random(#jogger.lines)]
+			if jogger.replies then
+				self.pendingReply = { at = world.time + quips.replyDelay, jogger = jogger, lines = jogger.replies }
+			end
+		elseif jogger.race == "tauren" then
 			line = quips.toTauren[math.random(#quips.toTauren)]
-			self.pendingReply = { at = world.time + quips.replyDelay, jogger = jogger }
+			self.pendingReply = { at = world.time + quips.replyDelay, jogger = jogger, lines = quips.taurenReply }
 		elseif math.random() < quips.sideChance then
 			-- A jogger on the left edge is passed on their right, and vice versa.
 			line = jogger.side < 0 and quips.passRight or quips.passLeft
@@ -358,13 +384,13 @@ function Controller:UpdateQuips()
 		self.nextQuip = world.time + talkTime + quips.gap
 	end
 
-	-- The Tauren's answer, if they're still in view.
+	-- The jogger's answer, if they're still in view.
 	local reply = self.pendingReply
 	if reply and world.time >= reply.at then
 		self.pendingReply = nil
 		local who = reply.jogger
 		if renderer:JoggerHeadPoint(who) then
-			self.replyBubble:Say(quips.taurenReply[math.random(#quips.taurenReply)], world.time + quips.duration, function()
+			self.replyBubble:Say(reply.lines[math.random(#reply.lines)], world.time + quips.duration, function()
 				return renderer:JoggerHeadPoint(who)
 			end)
 		end

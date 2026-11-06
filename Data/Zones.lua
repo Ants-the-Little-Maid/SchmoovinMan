@@ -1,6 +1,8 @@
 local _, ns = ...
 
 --[[ The run's zones. Mulgore is always first; the rest come in a random order.
+Westfall, Moonglade and the six capitals were added in 0.9.0, with Classic
+tilesets and props like the rest.
 
 Sources as in Data/Assets.lua (listfile 202611050009, wago.tools tables).
 Original-world (Classic) doodads and tilesets are used throughout, as they're
@@ -251,6 +253,213 @@ ns.Zones = {
 			wall = { { fileID = 202847 }, { fileID = 202874 } }, -- rock03, fallen tree 2
 		},
 		charger = { { displayID = 10579 }, { displayID = 21601 }, { displayID = 10914 }, { displayID = 161 } }, -- Ice Thistle Yeti, older yeti with other skins, wooly kodo, wolf
+	},	{
+		key = "westfall",
+		name = "Westfall",
+		ground = 188991, -- tileset/westwood/westfallgrassbase.blp
+		road = 188989, -- westfalldirtbase.blp
+		groundColor = C("a89a52"),
+		roadColor = C("9a7a52"),
+		sky = { top = C("7aa0d0"), bottom = C("f0e0b0") },
+		fog = { color = C("e8d8a8"), near = 45, far = 85 },
+		light = { ambient = C("c0b090"), diffuse = C("fff0d0") },
+		scenery = {
+			{ fileID = 190519, height = 12 }, -- azeroth/westfall/passivedoodads/westfallwindmill.m2
+			{ fileID = 190508, height = 10 }, -- westfallgrainsilo01.m2
+			{ fileID = 190638, height = 9 }, -- westfalltree01.m2
+			{ fileID = 190629, height = 4 }, -- westfallscarecrow.m2
+			{ fileID = 190597, height = 3 }, -- westfallhaystack01.m2
+			{ fileID = 190612, height = 4 }, -- westfalllamppost.m2
+		},
+		obstacles = {
+			low = { { fileID = 190598 }, { fileID = 190619 } }, -- haystack02, plow
+			high = { { fileID = 190659 }, { fileID = 190620 } }, -- westfallfence, rakecart
+			block = { { fileID = 190623 }, { fileID = 190535 } }, -- boulder01, barrel01
+			wall = { { fileID = 190599 }, { fileID = 190536 } }, -- haywagon, brokencart
+		},
+		charger = { { displayID = 378 }, { displayID = 367 } }, -- Harvest Watcher, Harvest Golem
+	},
+	{
+		key = "moonglade",
+		name = "Moonglade",
+		ground = 188639, -- tileset/moonglade/moongladegrassbase.blp
+		road = 188637, -- moongladedirtnograss.blp
+		groundColor = C("3f6a3a"),
+		roadColor = C("8a7a5a"),
+		sky = { top = C("2a3a6a"), bottom = C("a8b8e0") },
+		fog = { color = C("a0b0d8"), near = 40, far = 80 },
+		light = { ambient = C("8a90b8"), diffuse = C("e0e8ff") },
+		scenery = {
+			{ fileID = 202271, height = 14 }, -- kalimdor/moonglade/passivedoodads/moongladetree01.m2
+			{ fileID = 202272, height = 13 }, -- moongladetree02.m2
+			{ fileID = 202273, height = 12 }, -- moongladetree03.m2
+			{ fileID = 202258, height = 5 }, -- druidstone.m2
+			{ fileID = 202261, height = 2.5 }, -- moongladebush01.m2
+			{ fileID = 198780, height = 3.5 }, -- generic/nightelf/passive doodads/lanterns/nightelflantern01.m2
+		},
+		obstacles = {
+			low = { { fileID = 202263 }, { fileID = 202044 } }, -- moongladebush02, kalidartreelog01
+			high = { { fileID = 202045 }, { fileID = 198762 } }, -- kalidartreelog02, kalidargazibo
+			block = { { fileID = 202259 }, { fileID = 198949 } }, -- druidstonetopless, kalidarstonerune01
+			wall = { { fileID = 198834 }, { fileID = 198835 } }, -- nightelfruins01/02
+		},
+		charger = { { displayID = 12236 }, { displayID = 12238 }, { displayID = 1917 } }, -- Moonkin Oracle, Vicious Owlbeast, stag
+	},
+	{
+		key = "stormwind",
+		name = "Stormwind City",
+		ground = 187126, -- tileset/elwynn/elwynngrassbase.blp
+		road = 187099, -- elwynncobblestonebase.blp
+		groundColor = C("4f7a3a"),
+		roadColor = C("a09a8a"),
+		sky = { top = C("5f8fd0"), bottom = C("dce8f4") },
+		fog = { color = C("d0dce8"), near = 45, far = 85 },
+		light = { ambient = C("b0b8c0"), diffuse = C("fff8f0") },
+		scenery = {
+			{ fileID = 189629, height = 12 }, -- azeroth/elwynn/passivedoodads/humanguardtower.m2
+			{ fileID = 198591, height = 12 }, -- generic/human/passive doodads/stormwind/stormwindnightelftree.m2
+			{ fileID = 189927, height = 11 }, -- elwynntreecanopy01.m2
+			{ fileID = 189908, height = 6 }, -- lionstatue.m2
+			{ fileID = 197953, height = 5 }, -- allianceveteranbanner01.m2
+			{ fileID = 189825, height = 4 }, -- lamppost.m2
+		},
+		obstacles = {
+			low = { { fileID = 198158 }, { fileID = 189810 } }, -- crategrain01, haystack01
+			high = { { fileID = 189795 }, { fileID = 197851 } }, -- elwynnwoodfence01, gardenarch
+			block = { { fileID = 198004 }, { fileID = 189956 } }, -- beerkeg01, waterbasin
+			wall = { { fileID = 198288 }, { fileID = 189840 } }, -- stormwindgypsywagon01, ruinedcatapult
+		},
+		charger = { { displayID = 3167 }, { displayID = 3258 } }, -- Stormwind City Guard, Stormwind Guard
+	},
+	{
+		key = "darnassus",
+		name = "Darnassus",
+		ground = 188595, -- tileset/kalidar/kalidarleaf.blp
+		road = 188583, -- kalidardarnroad.blp
+		groundColor = C("3a5a3a"),
+		roadColor = C("8a8aa0"),
+		sky = { top = C("304070"), bottom = C("90a0c8") },
+		fog = { color = C("8090c0"), near = 40, far = 80 },
+		light = { ambient = C("8088b0"), diffuse = C("d8e0ff") },
+		scenery = {
+			{ fileID = 202050, height = 16 }, -- kalimdor/kalidar/passivedoodads/kalidartrees/kalidartree01.m2
+			{ fileID = 202051, height = 15 }, -- kalidartree02.m2
+			{ fileID = 202052, height = 14 }, -- kalidartree03.m2
+			{ fileID = 198945, height = 6 }, -- generic/nightelf/passive doodads/statues/statuenepriestess.m2
+			{ fileID = 198770, height = 4 }, -- darnassusstreetlamp01.m2
+			{ fileID = 198754, height = 3 }, -- elvenfountain.m2
+		},
+		obstacles = {
+			low = { { fileID = 202022 }, { fileID = 202059 } }, -- kalidarbush02, kalidartreestump01
+			high = { { fileID = 198761 }, { fileID = 202034 } }, -- kalidarmoongate, kalidargiantroot01
+			block = { { fileID = 198936 }, { fileID = 198950 } }, -- kalidarwoodstatue01, kalidarstonerune02
+			wall = { { fileID = 198824 }, { fileID = 198825 } }, -- newelfruin01/02
+		},
+		charger = { { displayID = 6805 }, { displayID = 1917 } }, -- Nightsaber, stag
+	},
+	{
+		key = "ironforge",
+		name = "Ironforge",
+		ground = 188573, -- tileset/ironforge/ironforgesnow01solid.blp
+		road = 188565, -- ironforgerock06road2.blp
+		groundColor = C("e0e6ee"),
+		roadColor = C("8a7a6a"),
+		sky = { top = C("6a88b0"), bottom = C("e0e8f0") },
+		fog = { color = C("d8e0ec"), near = 35, far = 75 },
+		light = { ambient = C("a8b0c8"), diffuse = C("f0f4ff") },
+		scenery = {
+			{ fileID = 203255, height = 12 }, -- khazmodan/ironforge/passivedoodads/ironforgepine01.m2
+			{ fileID = 203256, height = 11 }, -- ironforgepine02.m2
+			{ fileID = 203221, height = 9 }, -- ironforgestatue_01.m2
+			{ fileID = 203208, height = 8 }, -- snowytowerrock01.m2
+			{ fileID = 203139, height = 5 }, -- dwarfbannerblue01.m2
+			{ fileID = 203226, height = 4 }, -- ironforgesteamtank.m2
+		},
+		obstacles = {
+			low = { { fileID = 203265 }, { fileID = 197603 } }, -- ironstump01, alekegsingle
+			high = { { fileID = 203158 }, { fileID = 203213 } }, -- dunmoroghstonefence01, ironforgesignpost
+			block = { { fileID = 197238 }, { fileID = 197463 } }, -- dwarvenbarrel01, powderkeg01
+			wall = { { fileID = 203230 }, { fileID = 203159 } }, -- ironforgesteamtankruined01, dunmoroghstonefence02
+		},
+		charger = { { displayID = 3524 }, { displayID = 704 } }, -- Ironforge Guard, Mountain Boar
+	},
+	{
+		key = "thunderbluff",
+		name = "Thunder Bluff",
+		ground = 188658, -- tileset/mullgore/mullgorebaserock01.blp
+		road = 188662, -- mullgorecrackeddirt.blp
+		groundColor = C("8a7a5a"),
+		roadColor = C("b8a07a"),
+		sky = { top = C("4f88d0"), bottom = C("f0dcb0") },
+		fog = { color = C("e8d4a8"), near = 45, far = 85 },
+		light = { ambient = C("b8a888"), diffuse = C("fff0d8") },
+		scenery = {
+			{ fileID = 202322, height = 9 }, -- kalimdor/mulgore/passivedoodads/trees/mullgoretree01.m2
+			{ fileID = 200581, height = 5 }, -- generic/tauren/passive doodads/totems/taurentotem05.m2
+			{ fileID = 200410, height = 5 }, -- kites/taurenkite01.m2
+			{ fileID = 200397, height = 4 }, -- dreamcatchers/dreamcatcher01.m2
+			{ fileID = 200401, height = 3 }, -- drums/taurendrumgiant01.m2
+			{ fileID = 200406, height = 3 }, -- hitchingposts/taurenhitchingpost.m2
+		},
+		obstacles = {
+			low = { { fileID = 200420 }, { fileID = 200373 } }, -- kodoskulls01, largebasket02
+			high = { { fileID = 200406 }, { fileID = 200615 } }, -- taurenhitchingpost, windbreak03
+			block = { { fileID = 200409 }, { fileID = 200579 } }, -- taurenkiln01, taurentotem03
+			wall = { { fileID = 200431 }, { fileID = 199195 } }, -- taurenloomblue, kodowagon
+		},
+		charger = { { displayID = 1220 }, { displayID = 1230 } }, -- Adult Plainstrider, kodo
+	},
+	{
+		key = "orgrimmar",
+		name = "Orgrimmar",
+		ground = 187017, -- tileset/durotar/durotardirt.blp
+		road = 187034, -- durotarroad.blp
+		groundColor = C("a0603a"),
+		roadColor = C("b08a5a"),
+		sky = { top = C("b06a3a"), bottom = C("f0c890") },
+		fog = { color = C("e8b880"), near = 40, far = 80 },
+		light = { ambient = C("c0906a"), diffuse = C("ffd8b0") },
+		scenery = {
+			{ fileID = 201800, height = 9 }, -- kalimdor/durotar/passivedoodads/durotarpalm01.m2
+			{ fileID = 199384, height = 6 }, -- generic/orc/passive doodads/tents/durotarorctent01.m2
+			{ fileID = 199173, height = 5 }, -- hordebanners/hordebanner01.m2
+			{ fileID = 199056, height = 5 }, -- banners/clanbanner.m2
+			{ fileID = 199197, height = 4 }, -- lampposts/orcbrazierlamppost01.m2
+			{ fileID = 202360, height = 3 }, -- kalimdor/orgrimmar/passivedoodads/orgrimmarbonfire01.m2
+		},
+		obstacles = {
+			low = { { fileID = 199094 }, { fileID = 199049 } }, -- orccrate01, boarskull
+			high = { { fileID = 199209 }, { fileID = 199203 } }, -- orcfence, rawmeatrack01
+			block = { { fileID = 199090 }, { fileID = 199141 } }, -- orcbarrel01, tallbrazier01
+			wall = { { fileID = 199414 }, { fileID = 199415 } }, -- orcwagon01/02
+		},
+		charger = { { displayID = 381 }, { displayID = 193 } }, -- Dire Mottled Boar, Elder Mottled Boar
+	},
+	{
+		key = "undercity",
+		name = "Undercity",
+		ground = 188950, -- tileset/tirisfall/tirisfalldirtrock02.blp
+		road = 188963, -- tirisfallstoneroad01.blp
+		groundColor = C("3a4a32"),
+		roadColor = C("6a6a5a"),
+		sky = { top = C("1a2018"), bottom = C("5a6a40") },
+		fog = { color = C("4a5a38"), near = 30, far = 70 },
+		light = { ambient = C("708060"), diffuse = C("b0c8a0") },
+		scenery = {
+			{ fileID = 200660, height = 12 }, -- generic/undead/passive doodads/lordaerontowers/undercitytower01.m2
+			{ fileID = 200754, height = 7 }, -- statues/lordaeron_statue_01.m2
+			{ fileID = 200664, height = 4 }, -- meatwagon/meatwagon.m2
+			{ fileID = 200655, height = 3 }, -- lordaeronbrazier/lordaeronbrazier01.m2
+			{ fileID = 200788, height = 3 }, -- undercity torches/undead_torch01.m2
+			{ fileID = 204105, height = 2 }, -- lordaeron/tirisfalglade/passivedoodads/brillgraves01.m2
+		},
+		obstacles = {
+			low = { { fileID = 204104 }, { fileID = 200672 } }, -- brillcoffins, meatwagonwheel
+			high = { { fileID = 200761 }, { fileID = 204080 } }, -- undeadstonewroughtironfence, tirisfallbarricade
+			block = { { fileID = 200655 }, { fileID = 200772 } }, -- lordaeronbrazier01, undead_crankwheel
+			wall = { { fileID = 200666 }, { fileID = 204090 } }, -- meatwagonwrecked01, massgrave
+		},
+		charger = { { displayID = 10699 }, { displayID = 11401 } }, -- Undercity Guardian, Skeletal Executioner
 	},
 }
 

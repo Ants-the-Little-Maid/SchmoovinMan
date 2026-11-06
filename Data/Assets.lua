@@ -34,15 +34,84 @@ ns.Assets = {
 	-- picks the lines: Tauren joggers greet you in their own words. `weight`
 	-- (default 1) sets how often a list is picked: Tauren look like the runner
 	-- and stand out, so they come up about one jogger in six.
+	-- Famous Horde faces (Classic displays, from Wowhead's Classic NPC pages)
+	-- are rarer still. They have their own `lines` for the runner to say and
+	-- `replies` they answer with; if their model is missing, a generic jogger of
+	-- the same race stands in.
 	joggers = {
 		{ race = "orc", { displayID = 4259 }, { displayID = 4032 }, { displayID = 3743 } }, -- body type 1 (Orgrimmar Grunt)
 		{ race = "orc", { displayID = 4260 }, { displayID = 5706 }, { displayID = 4601 } }, -- body type 2 (Orgrimmar Grunt, Onlooker)
 		{ race = "troll", { displayID = 4622 }, { displayID = 11109 }, { displayID = 7037 } }, -- body type 1 (Skullsplitter Thug)
-		{ race = "troll", { displayID = 31738 }, { displayID = 4241 }, { displayID = 4782 } }, -- body type 2 (Sen'jin Guardian)
+		{ race = "troll", { displayID = 4241 }, { displayID = 4782 } }, -- body type 2 (Classic displays; 31738 is later and missing in Forever)
 		{ race = "tauren", weight = 0.4, { displayID = 2141 }, { displayID = 4262 }, { displayID = 11774 } }, -- body type 1 (Orgrimmar Brave)
 		{ race = "tauren", weight = 0.4, { displayID = 8572 }, { displayID = 11775 }, { displayID = 9392 } }, -- body type 2 (Orgrimmar Brave)
+
+		{
+			name = "Thrall", race = "orc", weight = 0.12, { displayID = 4527 }, { displayID = 4259 },
+			lines = { "Morning, Warchief!", "Race you to the Barrens, Thrall!" },
+			replies = { "Keep schmoovin', Tauren.", "For the Horde... and for cardio!" },
+		},
+		{
+			name = "Cairne Bloodhoof", race = "tauren", weight = 0.06, { displayID = 4307 }, { displayID = 2141 },
+			lines = { "Hey Schmoover! Oh, it's you, Chief!", "Lookin' schmoove, High Chieftain!" },
+			replies = { "My hooves aren't what they used to be.", "The Earth Mother made you for this." },
+		},
+		{
+			name = "Vol'jin", race = "troll", weight = 0.12, { displayID = 10357 }, { displayID = 4622 },
+			lines = { "Ey mon, keep up!", "Coming through, Vol'jin!" },
+			replies = { "Dis one got da schmooves, mon.", "Slow down, ya crazy cow!" },
+		},
+		{
+			name = "Sylvanas Windrunner", race = "undead", weight = 0.12, { displayID = 11657 }, { displayID = 4259 },
+			lines = { "Lovely day for a jog, Dark Lady!", "On your left, Banshee Queen!" },
+			replies = { "...Fine. That was fast.", "I was letting you win." },
+		},
+		{
+			name = "Varimathras", race = "demon", weight = 0.12, { displayID = 11658 }, { displayID = 4259 },
+			lines = { "Is that a dreadlord... jogging?", "Nice wings. Shame about the pace." },
+			replies = { "I am doing this ironically.", "You will regret that overtake." },
+		},
+		{
+			name = "Eitrigg", race = "orc", weight = 0.12, { displayID = 1619 }, { displayID = 4259 },
+			lines = { "On your left, old timer!", "Keep at it, Eitrigg!" },
+			replies = { "Back in my day, we walked.", "Bah! Youth." },
+		},
+		{
+			name = "Magatha Grimtotem", race = "tauren", weight = 0.06, { displayID = 4510 }, { displayID = 8572 },
+			lines = { "Lookin' schmoove, Elder!", "Morning, Magatha!" },
+			replies = { "Hmph. Show-off.", "Enjoy it while it lasts." },
+		},
+		{
+			name = "Hamuul Runetotem", race = "tauren", weight = 0.06, { displayID = 4519 }, { displayID = 2141 },
+			lines = { "Schmoove on, Arch Druid!", "Try cat form, Hamuul!" },
+			replies = { "The Earth Mother smiles on your stride.", "Such balance! Such schmoove!" },
+		},
+		{
+			name = "Drek'Thar", race = "orc", weight = 0.12, { displayID = 11894 }, { displayID = 4259 },
+			lines = { "Coming through, Drek'Thar!", "Mind the hooves, Elder!" },
+			replies = { "I heard you coming a mile away.", "The spirits say you're showing off." },
+		},
+		{
+			name = "High Overlord Saurfang", race = "orc", weight = 0.12, { displayID = 14732 }, { displayID = 4260 },
+			lines = { "Out of the way, High Overlord!", "Can't stop, Saurfang!" },
+			replies = { "Hah! Not bad, calf.", "Run, then. Run!" },
+		},
 	},
 	joggerHeight = 2.3,
+
+	-- Alliance joggers on the track itself. They jog away from you in a lane,
+	-- slower than you; run into one to knock them flying for bonus points (see
+	-- Tuning.alliance). They never end a run. Classic displays, from Wowhead's
+	-- Classic NPC pages: civilians and adventurers, not guards, so they don't
+	-- look like the city guards that charge at you.
+	alliance = {
+		{ { displayID = 3278 }, { displayID = 2677 } }, -- human (Godric Rothgar, Menethil Sentry)
+		{ { displayID = 2677 }, { displayID = 3278 } }, -- human (Menethil Sentry)
+		{ { displayID = 4950 }, { displayID = 5648 } }, -- dwarf (Tormus Deepforge)
+		{ { displayID = 5648 }, { displayID = 4950 } }, -- dwarf (Onin MacHammar)
+		{ { displayID = 4864 }, { displayID = 3278 } }, -- gnome (Tog Rustsprocket)
+		{ { displayID = 2306 }, { displayID = 3278 } }, -- night elf (Darnassus Sentinel)
+	},
 	-- Joggers run at this share of your speed, so you overtake them.
 	joggerSpeed = 0.45,
 
@@ -80,6 +149,19 @@ ns.Assets = {
 			"Oh he's schmoove",
 			"Could it be? The Schmoover!?",
 			"Earth Mother, look at him go!",
+		},
+		-- Said on knocking an Alliance jogger out of your lane.
+		knock = {
+			"Excuse me!",
+			"Pardon my hooves!",
+			"Should've schmooved!",
+			"Nothing personal, just schmoovin'!",
+			"Moo-ve!",
+			"STRIKE!",
+			"You were in my lane!",
+			"Watch the horns!",
+			"Schmoove or be schmooved!",
+			"Sorry! Not sorry!",
 		},
 		-- Seconds between the runner's compliment and the Tauren's reply.
 		replyDelay = 0.9,
@@ -160,6 +242,7 @@ ns.Assets = {
 		zone = "PVP_THROUGH_QUEUE",
 		crash = "IG_QUEST_LOG_ABANDON_QUEST",
 		shieldBreak = "UI_RAID_BOSS_WHISPER_WARNING",
+		knock = "UI_GARRISON_ARCHITECT_TABLE_BUILDING_PLACEMENT",
 		newBest = "LFG_REWARDS",
 		start = "UI_PET_BATTLE_START",
 		click = "U_CHAT_SCROLL_BUTTON",

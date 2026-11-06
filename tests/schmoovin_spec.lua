@@ -6,7 +6,7 @@ local seedCount = tonumber(arg and arg[2]) or 20
 local minutes = tonumber(arg and arg[3]) or 10
 
 local ns = {}
-for _, file in ipairs({ "Data/Tuning.lua", "Data/Assets.lua", "Game/Random.lua", "Game/Rules.lua", "Game/Patterns.lua", "Game/Runner.lua", "Game/World.lua", "Social/Codec.lua" }) do
+for _, file in ipairs({ "Data/Tuning.lua", "Data/Assets.lua", "Data/Zones.lua", "Game/Random.lua", "Game/Rules.lua", "Game/Patterns.lua", "Game/Runner.lua", "Game/World.lua", "Social/Codec.lua" }) do
 	local chunk = assert(loadfile(root .. "/" .. file))
 	chunk("SchmoovinMan", ns)
 end
@@ -150,14 +150,18 @@ do
 	local world = World.New(7, Tuning)
 	check("first zone is Mulgore", world:ZoneKey(1) == "mulgore")
 	local seen, repeats = {}, false
-	for index = 2, 8 do
+	local poolSize = #World.DEFAULT_ZONES
+	for index = 2, poolSize do
 		local key = world:ZoneKey(index)
 		if seen[key] or key == "mulgore" then
 			repeats = true
 		end
 		seen[key] = true
 	end
-	check("first round visits all seven other zones once", not repeats)
+	check("first round visits every other zone once", not repeats)
+	for _, key in ipairs(World.DEFAULT_ZONES) do
+		check("zone data for " .. key, ns.ZonesByKey and ns.ZonesByKey[key] ~= nil)
+	end
 	local neighbourRepeat = false
 	for index = 2, 80 do
 		if world:ZoneKey(index) == world:ZoneKey(index - 1) then
@@ -472,6 +476,76 @@ do
 	world.shield = true
 	RunFor(world, 1.6, "jump", arrive - 0.35)
 	check("blocks give no move points", world.movePoints == 0, world.movePoints)
+end
+
+-- Alliance joggers ----------------------------------------------------------------
+
+do
+	-- Running into one knocks them over for points, and never ends the run.
+	local world = MoveWorld(31)
+	local arrive = world.time + 1.0
+	world:AddEntity("alliance", world.runner.lane, arrive, 0)
+	RunFor(world, 2.0)
+	local knocked = false
+	for _, event in ipairs(world:DrainEvents()) do
+		knocked = knocked or (event.type == "knock" and event.points == Tuning.points.knock)
+	end
+	check("knocking an Alliance jogger scores " .. Tuning.points.knock, knocked and world.knocks == 1 and world.movePoints == Tuning.points.knock, world.movePoints)
+	check("knocking an Alliance jogger doesn't end the run", not world.over)
+
+	-- Jumping over one, or being in another lane, leaves them be.
+	world = MoveWorld(32)
+	arrive = world.time + 1.0
+	world:AddEntity("alliance", world.runner.lane, arrive, 0)
+	-- They close at a share of your speed, so time the jump on their real distance.
+	local jumped = false
+	while world.time < arrive + 1.5 and not world.over do
+		local entity = world.entities[1]
+		if not jumped and entity and entity.y < 2.2 then
+			world:Input("jump")
+			jumped = true
+		end
+		world:Step(Tuning.step)
+	end
+	check("jumping over an Alliance jogger leaves them be", world.knocks == 0 and not world.over, world.knocks)
+	world = MoveWorld(33)
+	world:AddEntity("alliance", world.runner.lane == 1 and 3 or 1, world.time + 1.0, 0)
+	RunFor(world, 2.0)
+	check("an Alliance jogger in another lane isn't knocked", world.knocks == 0)
+end
+
+do
+	-- They spawn, and never in a lane where they'd jog through a hazard.
+	local spawns = {}
+	local realAdd = World.AddEntity
+	World.AddEntity = function(self, role, lane, arrive, z)
+		local entity = realAdd(self, role, lane, arrive, z)
+		if role == "alliance" then
+			spawns[#spawns + 1] = { lane = lane, arrive = arrive, spawned = self.time }
+		end
+		return entity
+	end
+	local world = World.New(41, copy(Tuning), { recordTimeline = true })
+	-- No bot here, so keep the runner untouchable: a crash would stop the clock.
+	while world.time < 300 and not world.over do
+		world.safeLeft = 1
+		world:Step(Tuning.step)
+		world:DrainEvents()
+	end
+	World.AddEntity = realAdd
+	check("Alliance joggers spawn", #spawns > 10, #spawns)
+	local share = Tuning.alliance.speedShare
+	local solid = { L = true, H = true, B = true, W = true, C = true, A = true }
+	local clashes = 0
+	for _, spawn in ipairs(spawns) do
+		local from = spawn.arrive - share * (spawn.arrive - spawn.spawned)
+		for _, item in ipairs(world.timeline) do
+			if solid[item.code] and item.lane == spawn.lane and item.t >= from and item.t <= spawn.arrive + 0.3 then
+				clashes = clashes + 1
+			end
+		end
+	end
+	check("Alliance joggers never jog through a hazard", clashes == 0, clashes)
 end
 
 -- Guild messages ----------------------------------------------------------------

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0 (2026-11-06)
+
+- Eight new zones: Westfall, Moonglade, and the capitals Stormwind City, Darnassus, Ironforge, Thunder Bluff, Orgrimmar and Undercity. Each has its own ground, sky, scenery, hazards and charging creature. Runs still start in Mulgore.
+- Famous Horde joggers: Thrall, Cairne Bloodhoof, Vol'jin, Sylvanas, Varimathras, Eitrigg, Magatha, Hamuul, Drek'Thar and Saurfang now and then jog by the road. Your Tauren greets each in their own words, and they answer back.
+- The game-over guild badge only shows when the run is your character's new best, with the place it now holds. Before, every run showed where its score would rank, so a short run could read "#3 in guild" while you held #1.
+- Fixed a female troll jogger appearance that isn't in Forever ("didn't load" message).
+- Alliance joggers on the track: run into them to knock them flying, for +5 points and a one-liner. They never end your run, and they never jog through a hazard. Game over shows your knocks next to jumps and ducks.
+
 ## 0.8.2 (2026-11-06)
 
 - Fixed characters with a surname, such as "Ants Man", being saved as just "Ants". Your own guild messages came back under the full name, so you showed up twice on the guild board, and the game-over guild rank counted you against yourself. Runs and board entries saved under the first name move to the full name the first time you log in.

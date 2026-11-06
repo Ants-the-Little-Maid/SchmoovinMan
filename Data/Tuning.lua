@@ -86,5 +86,10 @@ ns.Tuning = {
 		-- For each obstacle in your path that you jump over or duck under.
 		jump = 2,
 		duck = 3,
+		-- For each Alliance jogger knocked out of your lane.
+		knock = 5,
 	},
+	-- Alliance joggers on the track: the chance one jogs in the gap after a
+	-- chunk, from this zone on, at this share of your speed.
+	alliance = { chance = 0.35, minZone = 1, speedShare = 0.45 },
 }

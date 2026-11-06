@@ -13,18 +13,21 @@ API for the renderer and UI:
 Fields:
   time, speed (shown speed), distance (yards run, for scrolling the ground)
   zoneIndex, zoneKey, zoneStart (time the current zone began)
-  score, tokenPoints, timePoints, movePoints, tokens, gems, jumps, ducks
+  score, tokenPoints, timePoints, movePoints, tokens, gems, jumps, ducks, knocks
   powerups = { windRider = left, magnet = left, goldRush = left, stampede = left }
   shield (bool), safeLeft (seconds of no-hit after a shield break or landing)
   runner = { lane, x, z, state, flying }   state: run | jump | duck | fly | crash
-  entities = array of { id, role, lane, x, y, z, arrive, magnet, smashed }
-      role: low | high | block | wall | charger | coin | gem |
+  entities = array of { id, role, lane, x, y, z, arrive, magnet, smashed, knocked }
+      role: low | high | block | wall | charger | coin | gem | alliance |
             windRider | magnet | shield | goldRush | stampede
+      alliance: an Alliance jogger in a lane, jogging away from you; knocked
+            (and worth points) when you run into it, never a hazard
   over (bool), crashRole, crashZoneKey
 
 Events ({ type = ..., ... }):
   collect {role, points}, powerup {role}, expire {role}, zone {index, key, fromSpeed},
   cleared {role, move, points} (jumped a low obstacle or ducked a high bar in your path),
+  knock {points} (ran into an Alliance jogger),
   crash {role}, shieldBreak {role}, smash {role}, jump, duck, land, lane
 ]]
 
@@ -36,6 +39,7 @@ local Rules, Patterns, Runner, Random = ns.Rules, ns.Patterns, ns.Runner, ns.Ran
 
 World.DEFAULT_ZONES = {
 	"mulgore", "burningsteppes", "ashenvale", "silithus", "ungoro", "barrens", "thousandneedles", "winterspring",
+	"westfall", "moonglade", "stormwind", "darnassus", "ironforge", "thunderbluff", "orgrimmar", "undercity",
 }
 
 local CODE_ROLE = { L = "low", H = "high", B = "block", W = "wall", C = "charger", c = "coin", a = "coin", g = "gem" }
@@ -62,7 +66,7 @@ function World.New(seed, tuning, options)
 	self.stampedeBlend = 0
 
 	self.score, self.tokenPoints, self.timePoints = 0, 0, 0
-	self.movePoints, self.jumps, self.ducks = 0, 0, 0
+	self.movePoints, self.jumps, self.ducks, self.knocks = 0, 0, 0, 0
 	self.tokens, self.gems = 0, 0
 	self.powerups = {}
 	self.shield = false
@@ -159,6 +163,44 @@ function World:PickPowerup(zone)
 	end, self.rng:Next()) or "magnet"
 end
 
+-- Pattern codes an Alliance jogger mustn't run through.
+local SOLID = { L = true, H = true, B = true, W = true, C = true, A = true }
+local SOLID_ROLE = { low = true, high = true, block = true, wall = true, charger = true }
+
+-- Sometimes an Alliance jogger jogs into the gap after a chunk. They move
+-- away from you, so before you reach them they cover part of the track ahead:
+-- only a lane with nothing solid along that stretch is used, so they never
+-- run through a hazard. `items` are the chunk just placed, from `start`.
+function World:SpawnAlliance(items, start, arrive, zone)
+	local alliance = self.tuning.alliance
+	if not alliance or zone < alliance.minZone or self.rng:Next() >= alliance.chance then
+		return
+	end
+	-- Anything arriving from `from` on lies on the stretch they jog over.
+	local from = arrive - alliance.speedShare * (arrive - self.time) - 0.5
+	local blocked = {}
+	for _, item in ipairs(items) do
+		local at = start + item.t
+		if SOLID[item.code] and at >= from then
+			blocked[item.lane] = true
+		end
+	end
+	for _, entity in ipairs(self.entities) do
+		if SOLID_ROLE[entity.role] and entity.arrive >= from then
+			blocked[entity.lane] = true
+		end
+	end
+	local free = {}
+	for lane = 1, #self.tuning.lanes do
+		if not blocked[lane] then
+			free[#free + 1] = lane
+		end
+	end
+	if #free > 0 then
+		self:AddEntity("alliance", self.rng:Pick(free), arrive, 0)
+	end
+end
+
 function World:SpawnChunk()
 	local tuning = self.tuning
 	local zone = Rules.ZoneIndex(tuning, self.cursor)
@@ -199,7 +241,9 @@ function World:SpawnChunk()
 			self.timeline[#self.timeline + 1] = { t = arrive, lane = item.lane, code = code }
 		end
 	end
-	self.cursor = self.cursor + duration + Rules.Gap(tuning, zone)
+	local gap = Rules.Gap(tuning, zone)
+	self:SpawnAlliance(items, self.cursor, self.cursor + duration + gap / 2, zone)
+	self.cursor = self.cursor + duration + gap
 end
 
 function World:SpawnSkyTokens()
@@ -319,6 +363,15 @@ function World:Collect(entity)
 	self:Emit({ type = "collect", role = role, points = points })
 end
 
+-- Running into an Alliance jogger knocks them flying, for points.
+function World:Knock(entity)
+	local points = self.tuning.points.knock or 0
+	entity.knocked = true
+	self.knocks = self.knocks + 1
+	self.movePoints = self.movePoints + points
+	self:Emit({ type = "knock", points = points })
+end
+
 -- Scores a jump or duck: while the obstacle passes through you, it must be in
 -- your path and you must be making its move (in the air for a low one,
 -- ducking for a high bar). Paid once it's behind you. Flying, smashing,
@@ -392,6 +445,9 @@ function World:Tick(h)
 		local closing = self.speed
 		if entity.role == "charger" then
 			closing = closing + tuning.chargerSpeed
+		elseif entity.role == "alliance" then
+			-- Jogging away from you, so you close on them more slowly.
+			closing = closing * (1 - tuning.alliance.speedShare)
 		end
 		entity.y = (entity.arrive - self.time) * closing
 
@@ -403,6 +459,10 @@ function World:Tick(h)
 				self:HitObstacle(entity)
 			end
 			self:CheckMove(entity, runner)
+		elseif entity.role == "alliance" then
+			if not self.over and not entity.knocked and Rules.Touches(entity.x, entity.y, entity.z, runner.x, runner.z, height) then
+				self:Knock(entity)
+			end
 		elseif not self.over then
 			if magnet and Rules.TOKEN[entity.role] and entity.y > 0 and entity.y < tuning.magnetRange then
 				entity.magnet = true
