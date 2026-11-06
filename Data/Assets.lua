@@ -31,14 +31,16 @@ ns.Assets = {
 	-- Joggers beside the road: generic Horde NPC appearances, body types 1 and 2.
 	-- Skyborne was asked for but isn't in the game data, so female Tauren stand in.
 	-- Each jogger picks one list; the rest of that list are its backups. `race`
-	-- picks the lines: Tauren joggers greet you in their own words.
+	-- picks the lines: Tauren joggers greet you in their own words. `weight`
+	-- (default 1) sets how often a list is picked: Tauren look like the runner
+	-- and stand out, so they come up about one jogger in six.
 	joggers = {
 		{ race = "orc", { displayID = 4259 }, { displayID = 4032 }, { displayID = 3743 } }, -- body type 1 (Orgrimmar Grunt)
 		{ race = "orc", { displayID = 4260 }, { displayID = 5706 }, { displayID = 4601 } }, -- body type 2 (Orgrimmar Grunt, Onlooker)
 		{ race = "troll", { displayID = 4622 }, { displayID = 11109 }, { displayID = 7037 } }, -- body type 1 (Skullsplitter Thug)
 		{ race = "troll", { displayID = 31738 }, { displayID = 4241 }, { displayID = 4782 } }, -- body type 2 (Sen'jin Guardian)
-		{ race = "tauren", { displayID = 2141 }, { displayID = 4262 }, { displayID = 11774 } }, -- body type 1 (Orgrimmar Brave)
-		{ race = "tauren", { displayID = 8572 }, { displayID = 11775 }, { displayID = 9392 } }, -- body type 2 (Orgrimmar Brave)
+		{ race = "tauren", weight = 0.4, { displayID = 2141 }, { displayID = 4262 }, { displayID = 11774 } }, -- body type 1 (Orgrimmar Brave)
+		{ race = "tauren", weight = 0.4, { displayID = 8572 }, { displayID = 11775 }, { displayID = 9392 } }, -- body type 2 (Orgrimmar Brave)
 	},
 	joggerHeight = 2.3,
 	-- Joggers run at this share of your speed, so you overtake them.

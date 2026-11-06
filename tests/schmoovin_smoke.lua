@@ -170,7 +170,15 @@ for _, record in ipairs(r.joggers) do
 	r:FreeRecord(record)
 end
 r.joggers, r.passes, r.joggerNext = {}, {}, 1e9
-local tauren = r:NewRecord(ns.Assets.joggers[5], "jogger")
+local function JoggerOf(race)
+	for _, list in ipairs(ns.Assets.joggers) do
+		if list.race == race then
+			return list
+		end
+	end
+	error("no " .. race .. " jogger list")
+end
+local tauren = r:NewRecord(JoggerOf("tauren"), "jogger")
 tauren.race, tauren.side, tauren.x, tauren.y = "tauren", 1, 5, 12
 table.insert(r.joggers, tauren)
 said = {}
@@ -178,7 +186,7 @@ Frames(3)
 assert(said[1] and compliments[said[1]], "runner didn't compliment the tauren: " .. tostring(said[1]))
 assert(said[2] and replies[said[2]], "tauren didn't reply: " .. tostring(said[2]))
 print("tauren exchange: " .. said[1] .. " / " .. said[2])
-local orc = r:NewRecord(ns.Assets.joggers[1], "jogger")
+local orc = r:NewRecord(JoggerOf("orc"), "jogger")
 orc.race, orc.side, orc.x, orc.y = "orc", -1, -5, 4
 table.insert(r.joggers, orc)
 C:HideBubbles()

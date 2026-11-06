@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.1 (2026-11-06)
+
+- Winterspring's charging yeti now uses Classic yeti models. The old one isn't in Forever, so it was swapped for a backup with a "didn't load" message.
+- Fewer Tauren joggers: about one in six, down from one in three.
+
 ## 0.8.0 (2026-11-06)
 
 - Jump and duck points: +2 for every obstacle you jump over and +3 for every bar you duck under, when it's in your path. Shown on the game-over screen as "Jumps and ducks".

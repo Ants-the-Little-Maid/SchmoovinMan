@@ -6,7 +6,7 @@ local seedCount = tonumber(arg and arg[2]) or 20
 local minutes = tonumber(arg and arg[3]) or 10
 
 local ns = {}
-for _, file in ipairs({ "Data/Tuning.lua", "Game/Random.lua", "Game/Rules.lua", "Game/Patterns.lua", "Game/Runner.lua", "Game/World.lua", "Social/Codec.lua" }) do
+for _, file in ipairs({ "Data/Tuning.lua", "Data/Assets.lua", "Game/Random.lua", "Game/Rules.lua", "Game/Patterns.lua", "Game/Runner.lua", "Game/World.lua", "Social/Codec.lua" }) do
 	local chunk = assert(loadfile(root .. "/" .. file))
 	chunk("SchmoovinMan", ns)
 end
@@ -77,6 +77,29 @@ end
 check("tempo shrinks", Rules.Tempo(Tuning, 5) < Rules.Tempo(Tuning, 1))
 check("tempo floor", Rules.Tempo(Tuning, 100) == Tuning.tempoMin)
 check("gap floor", Rules.Gap(Tuning, 100) == Tuning.gapMin)
+
+-- Weighted picks ----------------------------------------------------------------
+
+do
+	local Weighted = ns.Random.Weighted
+	local items = { { name = "a", w = 1 }, { name = "b", w = 0 }, { name = "c", w = 3 } }
+	local function weightOf(item)
+		return item.w
+	end
+	check("weighted: low roll", Weighted(items, weightOf, 0).name == "a")
+	check("weighted: zero weight skipped", Weighted(items, weightOf, 0.25).name == "c")
+	check("weighted: high roll", Weighted(items, weightOf, 0.999).name == "c")
+	check("weighted: nothing weighted", Weighted(items, function() return 0 end, 0.5) == nil)
+	-- Tauren joggers come up about one in six.
+	local tauren, steps = 0, 1000
+	for step = 0, steps - 1 do
+		local list = Weighted(ns.Assets.joggers, function(item) return item.weight or 1 end, step / steps)
+		if list.race == "tauren" then
+			tauren = tauren + 1
+		end
+	end
+	check("weighted: tauren joggers about one in six", near(tauren / steps, 1 / 6, 0.01), tauren / steps)
+end
 
 -- Patterns ----------------------------------------------------------------------
 

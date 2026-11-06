@@ -150,25 +150,13 @@ function World:AddEntity(role, lane, arrive, z)
 	return entity
 end
 
+local POWERUP_NAMES = { "magnet", "goldRush", "shield", "windRider", "stampede" }
+
 function World:PickPowerup(zone)
-	local total = 0
 	local weights = self.tuning.powerupWeights
-	local names = { "magnet", "goldRush", "shield", "windRider", "stampede" }
-	for _, name in ipairs(names) do
-		if weights[name].minZone <= zone then
-			total = total + weights[name].weight
-		end
-	end
-	local roll = self.rng:Next() * total
-	for _, name in ipairs(names) do
-		if weights[name].minZone <= zone then
-			roll = roll - weights[name].weight
-			if roll < 0 then
-				return name
-			end
-		end
-	end
-	return "magnet"
+	return Random.Weighted(POWERUP_NAMES, function(name)
+		return weights[name].minZone <= zone and weights[name].weight or 0
+	end, self.rng:Next()) or "magnet"
 end
 
 function World:SpawnChunk()

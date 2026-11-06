@@ -511,6 +511,11 @@ end
 
 -- Joggers ------------------------------------------------------------------------
 
+-- Jogger lists are picked in proportion to their `weight` (default 1).
+local function JoggerWeight(list)
+	return list.weight or 1
+end
+
 -- Joggers run alongside the road, slower than you, and report each overtake.
 function Renderer:UpdateJoggers(world, zone, moved, now)
 	local far = zone.fog.far + 5
@@ -522,7 +527,7 @@ function Renderer:UpdateJoggers(world, zone, moved, now)
 	self.joggerNext = self.joggerNext - moved
 	if self.joggerNext <= 0 then
 		self.joggerNext = 30 + math.random() * 40
-		local list = Assets.joggers[math.random(#Assets.joggers)]
+		local list = ns.Random.Weighted(Assets.joggers, JoggerWeight, math.random()) or Assets.joggers[1]
 		local record = self:NewRecord(list, "jogger")
 		if record then
 			record.race = list.race

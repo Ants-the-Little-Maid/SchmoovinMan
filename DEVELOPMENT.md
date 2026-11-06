@@ -99,7 +99,7 @@ Only these keys are kept from the rest of WoW while a run is live; anything else
 | Tokens | Gold coins 10 points, gems 50. Lines, jump arcs and sky lines while flying |
 | Time points | 10 per second, plus 2 per second for each zone reached |
 | Move points | +2 per low obstacle jumped and +3 per high bar ducked, when it's in your path and you make the move. Flying, Stampede smashes, shield hits and invulnerable pass-throughs don't count |
-| Joggers | Orcs, Trolls and Tauren of both body types jog along either side of the road at 45% of your speed, one every 30-70 yards. They're scenery: they never block you |
+| Joggers | Orcs, Trolls and Tauren of both body types jog along either side of the road at 45% of your speed, one every 30-70 yards. They're scenery: they never block you. Tauren are about one jogger in six (their `weight` in `Data/Assets.lua`), since they look like the runner and stand out |
 | Speech bubbles | Passing an orc or troll, your Tauren says something for 2.2 seconds, over its own head: "On your left!" or "On your right!" (matching the jogger's side) half the time, otherwise a line such as "OUTTA MY WAY I GOTTA SCHMOOVE". Passing a fellow Tauren, your Tauren compliments them a few yards before reaching them ("Hey Schmoover!", "Lookin' schmoove!"...), and they reply over their own head a moment later ("SCHMOOVIN GOOD!", "Could it be? The Schmoover!?"...). The compliment and reply lists are only used with Tauren. All lines are in `Data/Assets.lua` under `quips` |
 | Power-ups | Wind Rider (fly over everything, 8 s), Magnet (10 s), Thick Hide (absorbs one hit), Gold Rush (tokens x2, 12 s), Stampede (smash through, 5 s, from zone 3) |
 

@@ -250,7 +250,7 @@ ns.Zones = {
 			block = { { fileID = 202846 }, { fileID = 202842 } }, -- rock02, furbolg totem 2
 			wall = { { fileID = 202847 }, { fileID = 202874 } }, -- rock03, fallen tree 2
 		},
-		charger = { { displayID = 21597 }, { displayID = 10914 }, { displayID = 161 } }, -- yeti, wooly kodo, wolf
+		charger = { { displayID = 10579 }, { displayID = 21601 }, { displayID = 10914 }, { displayID = 161 } }, -- Ice Thistle Yeti, older yeti with other skins, wooly kodo, wolf
 	},
 }
 

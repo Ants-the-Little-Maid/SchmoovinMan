@@ -98,20 +98,11 @@ end
 -- Weighted pick among patterns unlocked by this zone. With ducking off,
 -- patterns that need it are left out.
 function Patterns.Pick(rng, zone, duckEnabled)
-	local total = 0
-	for _, pattern in ipairs(Patterns.LIST) do
-		if Allowed(pattern, zone, duckEnabled) then
-			total = total + pattern.weight
-		end
-	end
-	local roll = rng:Next() * total
-	for _, pattern in ipairs(Patterns.LIST) do
-		if Allowed(pattern, zone, duckEnabled) then
-			roll = roll - pattern.weight
-			if roll < 0 then
-				return pattern, rng:Next() < 0.5
-			end
-		end
+	local pattern = ns.Random.Weighted(Patterns.LIST, function(item)
+		return Allowed(item, zone, duckEnabled) and item.weight or 0
+	end, rng:Next())
+	if pattern then
+		return pattern, rng:Next() < 0.5
 	end
 	return Patterns.LIST[1], false
 end
