@@ -20,7 +20,34 @@ local function Readable(value)
 end
 
 function GuildBoard.PlayerName()
-	return UnitName("player")
+	return (ns.PlayerName())
+end
+
+-- Versions up to 0.8.1 saved this character under its first name only. Once
+-- per character with a surname, move those runs and its guild board entry to
+-- the full name, so it isn't listed twice or ranked against itself.
+function GuildBoard.AdoptFullName()
+	local full, first = ns.PlayerName()
+	if not full or full == first or ns.db.fullNames[full] then
+		return
+	end
+	ns.db.fullNames[full] = true
+	for _, entry in ipairs(ns.db.scores) do
+		if entry.character == first then
+			entry.character = full
+		end
+	end
+	for _, board in pairs(ns.db.guild) do
+		local old = board.players and board.players[first]
+		if old then
+			board.players[first] = nil
+			local current = board.players[full]
+			if not current or current.score < old.score then
+				old.name = full
+				board.players[full] = old
+			end
+		end
+	end
 end
 
 -- This character's own best. The personal top 10 is shared across the
@@ -232,6 +259,7 @@ ns.OnLoaded(function()
 	ns.RegisterEvent("CHAT_MSG_ADDON", OnMessage)
 	local asked = false
 	ns.RegisterEvent("PLAYER_ENTERING_WORLD", function()
+		GuildBoard.AdoptFullName()
 		Flush()
 		if not asked then
 			asked = true

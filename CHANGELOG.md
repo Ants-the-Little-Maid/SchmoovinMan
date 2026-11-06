@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.2 (2026-11-06)
+
+- Fixed characters with a surname, such as "Ants Man", being saved as just "Ants". Your own guild messages came back under the full name, so you showed up twice on the guild board, and the game-over guild rank counted you against yourself. Runs and board entries saved under the first name move to the full name the first time you log in.
+
 ## 0.8.1 (2026-11-06)
 
 - Winterspring's charging yeti now uses Classic yeti models. The old one isn't in Forever, so it was swapped for a backup with a "didn't load" message.

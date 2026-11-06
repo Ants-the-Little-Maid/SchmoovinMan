@@ -341,5 +341,40 @@ for _, entry in ipairs(altBoard) do
 end
 UnitName = realName
 assert(ns.GuildBoard.MyBest() ~= nil, "main lost its own best")
+
+-- Forever surnames: UnitName returns the surname second. Runs saved under the
+-- first name move to the full name, the character's own guild messages are
+-- ignored, and it isn't ranked against itself.
+local board = ns.GuildBoard.List()
+local mine = ns.GuildBoard.MyBest()
+assert(mine.character == "Moohammed", "expected a first-name run to migrate")
+UnitName = function() return "Moohammed", "Schmoove" end
+assert(ns.PlayerName() == "Moohammed Schmoove", "full name not built: " .. tostring(ns.PlayerName()))
+ns.GuildBoard.AdoptFullName()
+assert(mine.character == "Moohammed Schmoove", "run not moved to the full name")
+assert(ns.GuildBoard.MyBest() == mine, "full-name character lost its best")
+for _, f in ipairs(eventFrames) do
+	if rawget(f, "events") and rawget(f, "events").CHAT_MSG_ADDON then
+		f.scripts.OnEvent(f, "CHAT_MSG_ADDON", "SchmoovinMan", "B|" .. (mine.score + 1) .. "|900|40|2|1793800000", "GUILD", "Moohammed Schmoove-Realm")
+	end
+end
+local names, selfRows = {}, 0
+for _, entry in ipairs(ns.GuildBoard.List()) do
+	names[entry.name] = true
+	if entry.name == "Moohammed Schmoove" then
+		selfRows = selfRows + 1
+		assert(entry.score == mine.score, "own echoed message replaced the board entry")
+	end
+end
+assert(not names.Moohammed, "first-name entry still on the guild board")
+assert(selfRows == 1, "expected one row for the character, got " .. selfRows)
+local others = 0
+for _, entry in ipairs(ns.GuildBoard.List()) do
+	if entry.name ~= "Moohammed Schmoove" and entry.score > mine.score then
+		others = others + 1
+	end
+end
+assert(ns.GuildBoard.RankFor(mine.score) == others + 1, "ranked against itself")
+UnitName = realName
 print("templates used: " .. table.concat((function() local t = {} for k in pairs(templatesUsed) do t[#t + 1] = k end table.sort(t) return t end)(), ", "))
 print(("smoke ok: %d scores, guild board %d, %d messages sent, best %s"):format(#ns.db.scores, #ns.GuildBoard.List(), #sent, tostring(ns.db.scores[1].score)))

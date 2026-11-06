@@ -8,6 +8,8 @@ local DEFAULTS = {
 	scores = {},
 	-- Guild boards: guild key -> { [player] = best }.
 	guild = {},
+	-- Characters whose first-name-only runs were moved to their full name.
+	fullNames = {},
 	settings = {
 		sound = true,
 		duck = true,
@@ -28,6 +30,19 @@ local loadCallbacks = {}
 -- Runs once saved data is ready.
 function ns.OnLoaded(callback)
 	tinsert(loadCallbacks, callback)
+end
+
+-- This character's name as guildmates see it, then its first name. Forever
+-- characters can have a surname, which UnitName returns second (where Retail
+-- returns the realm), and addon messages carry the full name.
+function ns.PlayerName()
+	local name, surname = (UnitNameUnmodified or UnitName)("player")
+	if name and surname and surname ~= "" then
+		local constants = Constants and Constants.CharacterNameSeparatorConsts
+		local separator = constants and constants.CHARACTERNAME_SURNAME_SEPARATOR or " "
+		return name .. separator .. surname, name
+	end
+	return name, name
 end
 
 function ns.Print(message)

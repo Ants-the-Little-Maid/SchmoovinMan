@@ -33,7 +33,7 @@ function Scores.Add(world)
 		zones = world.zoneIndex,
 		zoneKey = world.crashZoneKey or world.zoneKey,
 		zoneLength = world.tuning.zoneLength,
-		character = UnitName("player"),
+		character = (ns.PlayerName()),
 		when = time(),
 	}
 	local list = ns.db.scores
