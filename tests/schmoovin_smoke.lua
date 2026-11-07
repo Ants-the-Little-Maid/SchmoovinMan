@@ -342,11 +342,12 @@ do
 	Frames(1)
 	assert(R.mount and R.mountAttached, "wind rider didn't attach the runner")
 	assert(R.runner.actor == before, "runner actor changed before landing")
-	C.world.runner:SetFlying(false)
-	C.world.runner.z = 0
-	R:UpdateMount(C.world)
-	assert(not R.mount, "wind rider still there after landing")
+	local mountActor = R.mount.actor
+	-- Let the flight run out and the runner come down.
+	Frames(ns.Tuning.durations.windRider + 2)
+	assert(not C.world.runner.flying and not R.mount, "wind rider still there after landing")
 	assert(R.runner.actor ~= before, "runner kept the actor it rode with")
+	assert(R.runner.actor ~= mountActor, "runner was given the actor that was the mount")
 	for _, actor in ipairs(R.scene.freeActors) do
 		assert(actor ~= before, "the ridden runner actor went back to the pool")
 	end

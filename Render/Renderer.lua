@@ -445,14 +445,16 @@ function Renderer:Dismount()
 	if self.mountAttached and runner then
 		pcall(mount.actor.DetachFromMount, mount.actor, runner.actor)
 	end
-	self:FreeRecord(mount)
-	self.mount = nil
+	-- The new runner is made before the mount goes back to the pool, so it
+	-- can't be handed the actor that was just the mount.
 	if self.mountAttachTried and runner then
 		runner.actor:ClearModel()
 		runner.actor:Hide()
 		self.runner = nil
 		self:SetupRunner()
 	end
+	self:FreeRecord(mount)
+	self.mount = nil
 	self.mountAttached = false
 	self.mountAttachTried = false
 	self.runnerAnim = nil
@@ -494,7 +496,6 @@ function Renderer:DrawRunner(world, now)
 		runner.actor:SetAlpha(1)
 		return
 	end
-	self.mountAttachTried = false
 
 	if state.state == "crash" then
 		self:PlayRunner("death")
