@@ -420,13 +420,7 @@ function Renderer:UpdateMount(world)
 		self.mount = self:NewRecord(Assets.windRider, "windRider")
 		self.mountAttached = false
 	elseif not runner.flying and self.mount and runner.z < 0.5 then
-		if self.mountAttached then
-			pcall(self.mount.actor.DetachFromMount, self.mount.actor, self.runner.actor)
-		end
-		self:FreeRecord(self.mount)
-		self.mount = nil
-		self.mountAttached = false
-		self.runnerAnim = nil
+		self:Dismount()
 	end
 	local mount = self.mount
 	if mount then
@@ -436,6 +430,32 @@ function Renderer:UpdateMount(world)
 			mount.animated = true
 		end
 	end
+end
+
+-- Takes the runner off the wind rider. Riding leaves the runner's actor
+-- scaled by the mount even after detaching, so the runner gets a fresh actor
+-- and the old one is retired rather than pooled, where it would make some
+-- later jogger or prop huge.
+function Renderer:Dismount()
+	local mount = self.mount
+	if not mount then
+		return
+	end
+	local runner = self.runner
+	if self.mountAttached and runner then
+		pcall(mount.actor.DetachFromMount, mount.actor, runner.actor)
+	end
+	self:FreeRecord(mount)
+	self.mount = nil
+	if self.mountAttachTried and runner then
+		runner.actor:ClearModel()
+		runner.actor:Hide()
+		self.runner = nil
+		self:SetupRunner()
+	end
+	self.mountAttached = false
+	self.mountAttachTried = false
+	self.runnerAnim = nil
 end
 
 function Renderer:DrawRunner(world, now)
@@ -658,12 +678,7 @@ function Renderer:Reset()
 	wipe(self.passes)
 	self.joggerNext = 20
 	self.joggerDistance = nil
-	if self.mount then
-		self:FreeRecord(self.mount)
-		self.mount = nil
-	end
-	self.mountAttached = false
-	self.mountAttachTried = false
+	self:Dismount()
 	self.lastRunnerX = nil
 	self:SetupRunner()
 end

@@ -332,6 +332,33 @@ assert(C.state == "running", "right-click fallback didn't start a run")
 -- larger max box, and stays inside the sane character scale range.
 local runnerScale = C.renderer:Fit(C.renderer.runner)
 assert(runnerScale and math.abs(runnerScale - ns.Assets.runnerHeight / 2) < 1e-6, "runner not sized from its active box: " .. tostring(runnerScale))
+-- Riding the wind rider leaves the runner's actor scaled by the mount, so
+-- landing gives the runner a fresh actor and keeps the old one out of the pool.
+do
+	local R = C.renderer
+	local before = R.runner.actor
+	C.world.safeLeft = 1e9
+	C.world:ApplyPowerup("windRider")
+	Frames(1)
+	assert(R.mount and R.mountAttached, "wind rider didn't attach the runner")
+	assert(R.runner.actor == before, "runner actor changed before landing")
+	C.world.runner:SetFlying(false)
+	C.world.runner.z = 0
+	R:UpdateMount(C.world)
+	assert(not R.mount, "wind rider still there after landing")
+	assert(R.runner.actor ~= before, "runner kept the actor it rode with")
+	for _, actor in ipairs(R.scene.freeActors) do
+		assert(actor ~= before, "the ridden runner actor went back to the pool")
+	end
+	-- Quitting mid-flight does the same.
+	local again = R.runner.actor
+	C.world:ApplyPowerup("windRider")
+	Frames(1)
+	assert(R.mountAttached, "wind rider didn't attach the second time")
+	R:Reset()
+	assert(not R.mount and R.runner.actor ~= again, "reset mid-flight kept the ridden runner actor")
+	C.world.safeLeft = 0
+end
 -- A model whose geometry hasn't streamed in yet is not measured.
 local waiting = C.renderer:NewRecord({ { fileID = 123456789 } }, "jogger")
 rawset(waiting.actor, "IsGeoReady", function() return false end)

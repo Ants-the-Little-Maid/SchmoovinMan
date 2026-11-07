@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.1 (2026-11-07)
+
+- Fixed the runner staying giant after a Wind Rider flight, for the rest of the session.
+
 ## 0.9.0 (2026-11-06)
 
 - Eight new zones: Westfall, Moonglade, and the capitals Stormwind City, Darnassus, Ironforge, Thunder Bluff, Orgrimmar and Undercity. Each has its own ground, sky, scenery, hazards and charging creature. Runs still start in Mulgore.
