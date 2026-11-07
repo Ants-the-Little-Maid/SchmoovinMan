@@ -3,6 +3,7 @@
 ## 0.9.1 (2026-11-07)
 
 - Fixed the runner staying giant after a Wind Rider flight, for the rest of the session.
+- The runner now loads its Classic look straight away, without the "3 model(s) didn't load" message.
 
 ## 0.9.0 (2026-11-06)
 

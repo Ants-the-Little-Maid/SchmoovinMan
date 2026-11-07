@@ -17,12 +17,11 @@ the renderer moves to the next one. A candidate is { displayID = n } or
 ]]
 
 ns.Assets = {
-	-- Generic Tauren male (race 6, body type 1) NPC appearances, then the bare models.
+	-- Generic Tauren male (race 6, body type 1): a Classic NPC appearance, then
+	-- the bare models. Later "Tauren Male" displays (45379, 43012, 43611) aren't
+	-- in Forever.
 	runner = {
-		{ displayID = 45379 }, -- "Tauren Male"
-		{ displayID = 43012 }, -- "Tauren 01"
-		{ displayID = 43611 }, -- "Tauren"
-		{ displayID = 2141 }, -- Orgrimmar Brave (older appearance)
+		{ displayID = 2141 }, -- Orgrimmar Brave
 		{ fileID = 968705 }, -- character/tauren/male/taurenmale_hd.m2
 		{ fileID = 122055 }, -- character/tauren/male/taurenmale.m2
 	},
