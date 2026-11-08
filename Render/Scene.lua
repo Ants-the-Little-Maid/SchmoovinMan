@@ -8,6 +8,7 @@ ns.Scene = Scene
 
 local ACTOR_TEMPLATE = "SchmoovinManActorTemplate"
 local FIELD_OF_VIEW = 0.95
+Scene.FIELD_OF_VIEW = FIELD_OF_VIEW
 
 function Scene.Create(parent)
 	local self = setmetatable({}, Scene)
@@ -27,6 +28,7 @@ function Scene.Create(parent)
 	self.yaw = math.pi / 2
 	self.pitch = math.rad(17)
 	self.pitchSign = 1
+	self.fov = FIELD_OF_VIEW
 	self.xSign = 1
 	self.projectionMode = "local"
 	self.flipProjectedY = false
@@ -43,12 +45,14 @@ function Scene:SetLighting(light)
 	frame:SetLightDiffuseColor(light.diffuse[1], light.diffuse[2], light.diffuse[3])
 end
 
-function Scene:SetFog(fog)
+-- lift: yards to push the fog back by, keeping its depth (see Renderer:UpdateFog).
+function Scene:SetFog(fog, lift)
 	local frame = self.frame
 	if frame.SetFogColor then
+		lift = lift or 0
 		frame:SetFogColor(fog.color[1], fog.color[2], fog.color[3])
-		frame:SetFogNear(fog.near)
-		frame:SetFogFar(fog.far)
+		frame:SetFogNear(fog.near + lift)
+		frame:SetFogFar(fog.far + lift)
 	end
 end
 
@@ -69,6 +73,13 @@ function Scene:ApplyCamera()
 	local tx = self.targetX * self.xSign
 	frame:SetCameraPosition(tx - forwardX * self.distance, self.targetY - forwardY * self.distance, self.targetZ - forwardZ * self.distance)
 	frame:SetLightDirection(forwardX * 0.6 + 0.3, forwardY, forwardZ - 0.4)
+end
+
+function Scene:SetFieldOfView(fov)
+	if fov ~= self.fov then
+		self.fov = fov
+		self.frame:SetCameraFieldOfView(fov)
+	end
 end
 
 -- Projection -----------------------------------------------------------------

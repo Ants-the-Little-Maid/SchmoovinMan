@@ -7,6 +7,8 @@ ns.Window = Window
 
 local UI = ns.UI
 local WIDTH, HEIGHT, TITLE_HEIGHT = 960, 600, 30
+-- The title bar's small buttons.
+local BUTTON_FONT, BUTTON_FONT_SIZE = "Fonts\\FRIZQT__.TTF", 11
 
 -- Window sizes, as a scale on the 960 x 600 layout so everything grows together.
 Window.SIZES = {
@@ -32,6 +34,15 @@ function Window.ApplySize(frame, key)
 		UI.SetTabSelected(button, sizeKey == chosen.key)
 	end
 	return chosen.key
+end
+
+-- Enables or greys out the Pause button and sets its label. The button
+-- template swaps font objects when it's enabled or disabled, so the small
+-- font goes back on after.
+function Window.SetPauseButton(button, enabled, label)
+	button:SetEnabled(enabled)
+	button.text:SetText(label)
+	button.text:SetFont(BUTTON_FONT, BUTTON_FONT_SIZE, "")
 end
 
 function Window.Create(controller)
@@ -92,22 +103,51 @@ function Window.Create(controller)
 	close:SetScript("OnClick", function()
 		frame:Hide()
 	end)
-	local pause = UI.Button(titleBar, "II", nil, 30, 22)
-	pause.text:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
-	pause:SetPoint("RIGHT", titleBar, "RIGHT", -34, 0)
-	pause:SetScript("OnClick", function()
+	-- Pause sits at the left end, away from the size and close buttons; it
+	-- reads "Resume" while paused.
+	local pause = UI.Button(titleBar, "Pause", nil, 70, 22)
+	pause.text:SetFont(BUTTON_FONT, BUTTON_FONT_SIZE, "")
+	pause:SetPoint("LEFT", titleBar, "LEFT", 8, 0)
+	-- Greyed out outside a run (see Controller:UpdatePauseButton), with a
+	-- tooltip that still says why.
+	local function ShowPauseTip(self)
+		GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+		if controller.state == "paused" then
+			GameTooltip:SetText("Resume (P)")
+		elseif controller.state == "running" and not controller.overAt then
+			GameTooltip:SetText("Pause (Esc or P)")
+		else
+			GameTooltip:SetText("Pause: only during a run")
+		end
+		GameTooltip:Show()
+	end
+	pause:SetScript("OnClick", function(self)
 		controller:TogglePause()
+		-- The tooltip under the cursor follows the change.
+		if GameTooltip:IsOwned(self) then
+			ShowPauseTip(self)
+		end
+	end)
+	pause:SetMotionScriptsWhileDisabled(true)
+	pause:SetScript("OnEnter", ShowPauseTip)
+	pause:SetScript("OnLeave", function()
+		GameTooltip:Hide()
 	end)
 	frame.pauseButton = pause
 
-	-- Window size choices, right to left so Small sits leftmost.
+	-- Window size choices, right to left so Small sits leftmost, clear of the
+	-- close button in the corner.
 	frame.sizeButtons = {}
-	local anchor = pause
+	local anchor
 	for index = #Window.SIZES, 1, -1 do
 		local size = Window.SIZES[index]
 		local button = UI.Button(titleBar, size.label, nil, 30, 22)
-		button.text:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
-		button:SetPoint("RIGHT", anchor, "LEFT", index == #Window.SIZES and -14 or -4, 0)
+		button.text:SetFont(BUTTON_FONT, BUTTON_FONT_SIZE, "")
+		if anchor then
+			button:SetPoint("RIGHT", anchor, "LEFT", -4, 0)
+		else
+			button:SetPoint("RIGHT", titleBar, "RIGHT", -34, 0)
+		end
 		button:SetScript("OnClick", function()
 			controller:SetWindowSize(size.key)
 		end)

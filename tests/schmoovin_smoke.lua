@@ -148,6 +148,16 @@ C.keys.scripts.OnKeyUp(C.keys, "P")
 C.keys.scripts.OnKeyDown(C.keys, "P")
 assert(C.state == "running", "P didn't resume")
 C.keys.scripts.OnKeyUp(C.keys, "P")
+-- The title bar's Pause button pauses and resumes, and says which.
+local pauseButton = C.frame.pauseButton
+rawset(pauseButton, "SetEnabled", function(self, on) rawset(self, "enabled", on) end)
+rawset(pauseButton.text, "SetText", function(self, text) rawset(self, "value", text) end)
+pauseButton.scripts.OnClick(pauseButton)
+Frames(0.05)
+assert(C.state == "paused" and pauseButton.text.value == "Resume" and pauseButton.enabled, "Pause button didn't pause")
+pauseButton.scripts.OnClick(pauseButton)
+Frames(0.05)
+assert(C.state == "running" and pauseButton.text.value == "Pause", "Pause button didn't resume")
 local said = {}
 local realSay = ns.Bubble.Say
 ns.Bubble.Say = function(self, text, untilTime, anchor)
@@ -232,6 +242,114 @@ Frames(2)
 assert(C.world.knocks == knocksBefore + 1, "Alliance jogger wasn't knocked")
 assert(said[1] and knockLines[said[1]], "no knock line: " .. tostring(said[1]))
 print("knock: " .. said[1])
+-- A boss fight, made due now in Westfall: banner, boss bar, the boss drawn,
+-- throws with landing marks, spears thrown at it, then the driven-off banner
+-- and the boss running off without coming back.
+do
+	local world = C.world
+	local hud = C.hud
+	local labels = {}
+	rawset(hud.bannerLabel, "SetText", function(self, text) labels[#labels + 1] = text end)
+	rawset(hud.bossCount, "SetText", function(self, text) rawset(self, "value", text) end)
+	rawset(hud.zoneNext, "SetText", function(self, text) rawset(self, "value", text) end)
+	local sceneFrame = r.scene.frame
+	rawset(sceneFrame, "SetFogNear", function(self, value) rawset(self, "fogNear", value) end)
+	rawset(sceneFrame, "SetFogFar", function(self, value) rawset(self, "fogFar", value) end)
+	-- The run so far may have met its first boss already: see it off first.
+	local earlier = world.boss
+	if world:InFight() then
+		world:EndBoss("survived")
+		Frames(3)
+		assert(not r.bossRecord, "earlier boss still drawn after leaving")
+	end
+	world.zoneOrder[world.zoneIndex] = "westfall"
+	world.zoneKey = "westfall"
+	world.bossZone = world.zoneIndex
+	world.paused = world.paused - (world:BossStart() - world.time)
+	world.safeLeft = 1e9
+	Frames(0.2)
+	assert(world.boss ~= earlier and world.boss.state == "fight" and world.boss.name == "Edwin VanCleef", "boss didn't turn up")
+	assert(labels[#labels] == "BOSS", "no boss banner: " .. tostring(labels[#labels]))
+	assert(hud.boss.shown, "boss bar not shown")
+	-- The boss bar shares the top slot with banners: faded while the boss's
+	-- banner shows, then fully there.
+	assert(hud.boss.lastAlpha < 0.5, "boss bar not giving way to the banner: " .. tostring(hud.boss.lastAlpha))
+	assert(hud.zoneNext.value:find("paused"), "zone line doesn't say it's paused: " .. tostring(hud.zoneNext.value))
+	assert(hud.bossCount.value == "0 of " .. world.boss.needed .. " spears", "boss bar count: " .. tostring(hud.bossCount.value))
+	assert(r.bossRecord and r.bossRecord.ready, "boss not drawn")
+	-- Throws arc in with a mark where they land.
+	local marks = 0
+	for _ = 1, 300 do
+		world.safeLeft = 1e9
+		Frames(1 / 60)
+		marks = math.max(marks, r.markers.count)
+	end
+	assert(marks > 0, "no landing marks for thrown hazards")
+	-- The fog has drawn back, keeping its depth, so the boss isn't lost in it.
+	local fog = r.zone.fog
+	local depth = fog.far - fog.near
+	local fogNear, fogFar = rawget(sceneFrame, "fogNear") or fog.near, rawget(sceneFrame, "fogFar") or fog.far
+	local fightCamera = ns.Renderer.FIGHT_CAMERA
+	local cameraY = fightCamera.lookAhead - fightCamera.distance * math.cos(fightCamera.pitch)
+	local cameraZ = fightCamera.height + fightCamera.distance * math.sin(fightCamera.pitch)
+	local into = (math.sqrt((ns.Tuning.boss.distance - cameraY) ^ 2 + cameraZ ^ 2) - fogNear) / depth
+	assert(fogNear > fog.near and math.abs(fogFar - fogNear - depth) < 1e-6, "fog didn't draw back for the boss")
+	assert(into <= 0.15 + 1e-6, ("boss still deep in the fog: %.2f of the way in"):format(into))
+	-- The camera has moved to the fight view. In the real client the view
+	-- spans tan(fov / 2) / 2.086 either side of its centre (measured from a
+	-- 0.10.0 screenshot), so check the framing with that: the tallest boss's
+	-- head under the boss bar (the top 9% of the view) and the runner's feet
+	-- still in view.
+	local scene, fight = r.scene, ns.Renderer.FIGHT_CAMERA
+	assert(math.abs(scene.pitch - fight.pitch) < 1e-9 and math.abs(scene.fov - fight.fov) < 1e-9, "camera didn't move to the fight view")
+	local function FromTop(y, z)
+		local cy = scene.targetY - scene.distance * math.cos(scene.pitch)
+		local cz = scene.targetZ + scene.distance * math.sin(scene.pitch)
+		local angle = math.atan(z - cz, y - cy) + scene.pitch
+		return 0.5 - 0.5 * math.tan(angle) / (math.tan(scene.fov / 2) / 2.086)
+	end
+	local tallest = 0
+	for _, zone in ipairs(ns.Zones) do
+		tallest = math.max(tallest, zone.boss and zone.boss.height or 0)
+	end
+	local head, feet = FromTop(ns.Tuning.boss.distance, tallest), FromTop(0, 0)
+	assert(head > 0.11, ("a %.1f-yard boss's head is behind the boss bar: %.2f from the top"):format(tallest, head))
+	assert(feet < 0.98, ("runner's feet out of view in a fight: %.2f from the top"):format(feet))
+	print(("fight view: tallest boss's head %.2f from the top, runner's feet %.2f"):format(head, feet))
+	assert(hud.boss.lastAlpha == 1, "boss bar not showing after the banner: " .. tostring(hud.boss.lastAlpha))
+	print(("boss: %s, %d spears needed, up to %d landing marks"):format(world.boss.name, world.boss.needed, marks))
+	-- A spear grabbed is thrown at the boss.
+	world:AddEntity("spear", world.runner.lane, world.time + 0.3, 0.9)
+	local shot = false
+	for _ = 1, 60 do
+		world.safeLeft = 1e9
+		Frames(1 / 60)
+		shot = shot or #r.shots > 0
+	end
+	assert(world.boss.hits == 1 and shot, "spear wasn't thrown at the boss")
+	assert(hud.bossCount.value == "1 of " .. world.boss.needed .. " spears", "boss bar didn't count the hit: " .. tostring(hud.bossCount.value))
+	world.boss.hits = world.boss.needed - 1
+	world:AddEntity("spear", world.runner.lane, world.time + 0.3, 0.9)
+	Frames(1)
+	assert(world.boss.state == "driven", "boss wasn't driven off")
+	assert(labels[#labels] == "DRIVEN OFF", "no driven-off banner: " .. tostring(labels[#labels]))
+	assert(not hud.boss.shown, "boss bar still shown")
+	Frames(3)
+	assert(not r.bossRecord, "boss still drawn after running off")
+	Frames(1.5)
+	local chase = ns.Renderer.CAMERA
+	assert(math.abs(scene.pitch - chase.pitch) < 1e-9 and math.abs(scene.fov - chase.fov) < 1e-9, "camera didn't go back after the boss left")
+	fogNear, fogFar = rawget(sceneFrame, "fogNear"), rawget(sceneFrame, "fogFar")
+	assert(math.abs(fogNear - r.zone.fog.near) < 1e-6 and math.abs(fogFar - r.zone.fog.far) < 1e-6,
+		"fog didn't settle back after the boss left: " .. fogNear)
+	rawset(sceneFrame, "SetFogNear", nil)
+	rawset(sceneFrame, "SetFogFar", nil)
+	world.safeLeft = 1e9
+	rawset(hud.bannerLabel, "SetText", nil)
+	rawset(hud.bossCount, "SetText", nil)
+	assert(hud.zoneNext.value:find("next in"), "zone line still paused after the boss left: " .. tostring(hud.zoneNext.value))
+	rawset(hud.zoneNext, "SetText", nil)
+end
 -- High bars get posts.
 local high = C.world:AddEntity("high", 2, C.world.time + 3, 0)
 Frames(0.2)
@@ -253,8 +371,39 @@ C.world.safeLeft = 0
 C.world.shield = false
 C.world.powerups = {}
 C.world:AddEntity("block", C.world.runner.lane, C.world.time + 0.3, 0)
-Frames(3)
+Frames(0.6)
+-- Crashed, and still on screen for a moment: the run is over, so neither
+-- the button nor P pauses it.
+assert(C.world.over and C.state == "running", "not in the moment after the crash: " .. tostring(C.state))
+assert(pauseButton.enabled == false, "Pause button not greyed out after the crash")
+pauseButton.scripts.OnClick(pauseButton)
+assert(C.state == "running", "the Pause button paused a crashed run")
+C.keys.scripts.OnKeyDown(C.keys, "P")
+C.keys.scripts.OnKeyUp(C.keys, "P")
+assert(C.state == "running", "P paused a crashed run")
+Frames(2.4)
 assert(C.state == "over", "crash didn't end the run, state " .. tostring(C.state))
+Frames(0.05)
+assert(pauseButton.enabled == false, "Pause button not greyed out on the game-over screen")
+-- Roadside scenery stands clear of the road, whatever its size: no corner of
+-- its turned box within 1.5 yards of the edge (3.9 yards out).
+local sceneryChecked = 0
+for _, record in ipairs(C.renderer.scenery) do
+	if record.ready then
+		sceneryChecked = sceneryChecked + 1
+		local box, scale = r.bounds[record.key], r:Fit(record)
+		local c, s = math.cos(record.yaw), math.sin(record.yaw)
+		local reach = 0
+		for _, mx in ipairs({ box[1], box[4] }) do
+			for _, my in ipairs({ box[2], box[5] }) do
+				reach = math.max(reach, math.abs(mx * c - my * s) * scale)
+			end
+		end
+		assert(record.offRoad and math.abs(record.x) - reach >= 3.9 + 1.5 - 1e-6,
+			("scenery reaches the road: x %.2f, reach %.2f"):format(record.x, reach))
+	end
+end
+assert(sceneryChecked > 0, "no scenery to check")
 assert(#ns.db.scores == 1, "score not saved")
 C.screens:ShowBoard("guild")
 C.screens:ShowBoard("mine")

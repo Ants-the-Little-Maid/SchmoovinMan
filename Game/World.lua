@@ -6,28 +6,39 @@ API for the renderer and UI:
   world = ns.World.New(seed, tuning [, options])
       options.zones          ordered zone keys; the first is always first
       options.recordTimeline true to keep world.timeline ({t, lane, code})
+      options.bosses         false to leave bosses out
   world:Step(dt)             advances in fixed steps (tuning.step)
   world:Input(action)        "left" | "right" | "jump" | "duck"
   world:DrainEvents()        returns and clears this frame's events
 
 Fields:
-  time, speed (shown speed), distance (yards run, for scrolling the ground)
-  zoneIndex, zoneKey, zoneStart (time the current zone began)
-  score, tokenPoints, timePoints, movePoints, tokens, gems, jumps, ducks, knocks
+  time (seconds run), course (the zone clock: time less the time spent in boss
+      fights, which zones and speed follow), speed (shown speed), distance
+      (yards run, for scrolling the ground)
+  zoneIndex, zoneKey, zoneStart (course time the current zone began)
+  score, tokenPoints, timePoints, movePoints, bossPoints, tokens, gems, jumps,
+      ducks, knocks, spearHits, bossesDriven, bossesSurvived
   powerups = { windRider = left, magnet = left, goldRush = left, stampede = left }
   shield (bool), safeLeft (seconds of no-hit after a shield break or landing)
   runner = { lane, x, z, state, flying }   state: run | jump | duck | fly | crash
-  entities = array of { id, role, lane, x, y, z, arrive, magnet, smashed, knocked }
-      role: low | high | block | wall | charger | coin | gem | alliance |
+  boss = nil, or the latest fight: { key, name, zone, start, ends, needed, hits,
+      state = "fight" | "driven" | "survived", endedAt }
+  entities = array of { id, role, lane, x, y, z, arrive, magnet, smashed, knocked, thrown }
+      role: low | high | block | wall | charger | coin | gem | alliance | spear |
             windRider | magnet | shield | goldRush | stampede
       alliance: an Alliance jogger in a lane, jogging away from you; knocked
             (and worth points) when you run into it, never a hazard
+      thrown: a hazard the boss throws, with phase "waiting" (in its hand),
+            "flying" or "landed" (see Rules.ThrowPhase; it only ever moves on);
+            spear: a boss-only pickup that's thrown at the boss when you grab it
   over (bool), crashRole, crashZoneKey
 
 Events ({ type = ..., ... }):
   collect {role, points}, powerup {role}, expire {role}, zone {index, key, fromSpeed},
   cleared {role, move, points} (jumped a low obstacle or ducked a high bar in your path),
   knock {points} (ran into an Alliance jogger),
+  bossStart {name, needed, limit}, spear {hits, needed, points},
+  bossEnd {result = "driven" | "survived", name, points},
   crash {role}, shieldBreak {role}, smash {role}, jump, duck, land, lane
 ]]
 
@@ -45,6 +56,10 @@ World.DEFAULT_ZONES = {
 local CODE_ROLE = { L = "low", H = "high", B = "block", W = "wall", C = "charger", c = "coin", a = "coin", g = "gem" }
 local GROUND_TOKEN_Z = 0.9
 local AIR_TOKEN_Z = 2.2
+-- What a boss throws for each pattern code: hazards only, and a charging
+-- creature becomes a block (it can't be thrown; a block asks the same of you).
+local BOSS_CODE = { L = "L", A = "L", H = "H", B = "B", W = "W", C = "B" }
+local NEVER = -1000
 
 function World.New(seed, tuning, options)
 	options = options or {}
@@ -56,6 +71,8 @@ function World.New(seed, tuning, options)
 	self.timeline = options.recordTimeline and {} or nil
 
 	self.time = 0
+	self.course = 0
+	self.paused = 0
 	self.accumulator = 0
 	self.distance = 0
 	self.zoneIndex = 1
@@ -67,6 +84,7 @@ function World.New(seed, tuning, options)
 
 	self.score, self.tokenPoints, self.timePoints = 0, 0, 0
 	self.movePoints, self.jumps, self.ducks, self.knocks = 0, 0, 0, 0
+	self.bossPoints, self.spearHits, self.bossesDriven, self.bossesSurvived = 0, 0, 0, 0
 	self.tokens, self.gems = 0, 0
 	self.powerups = {}
 	self.shield = false
@@ -81,6 +99,11 @@ function World.New(seed, tuning, options)
 	self.skyNext = 0
 	self.skyLane = 2
 	self.over = false
+
+	if options.bosses ~= false and tuning.boss then
+		local first = tuning.boss.first
+		self.bossZone = self:FindBossZone(self.rng:Int(first[1], first[2]))
+	end
 	return self
 end
 
@@ -137,6 +160,159 @@ function World:Step(dt)
 	end
 end
 
+-- Bosses -------------------------------------------------------------------------
+
+-- The boss data for a zone key, if that zone has one.
+local function BossData(key)
+	local zone = ns.ZonesByKey and ns.ZonesByKey[key]
+	return zone and zone.boss
+end
+
+-- The first zone from `index` on that has a boss.
+function World:FindBossZone(index)
+	if #self.zonePool < 2 then
+		return nil
+	end
+	for zone = index, index + 2 * #self.zonePool do
+		if BossData(self:ZoneKey(zone)) then
+			return zone
+		end
+	end
+	return nil
+end
+
+-- Run time the next boss turns up. Only valid between fights, while the zone
+-- clock runs in step with the run.
+function World:BossStart()
+	local tuning = self.tuning
+	return (self.bossZone - 1) * tuning.zoneLength + tuning.boss.delay + self.paused
+end
+
+function World:InFight()
+	return self.boss ~= nil and self.boss.state == "fight"
+end
+
+-- The fight a chunk arriving at `at` falls in: its zone and the run time the
+-- boss gives up. Chunks are spawned seconds ahead, so this also covers a fight
+-- that hasn't started yet.
+function World:FightAt(at)
+	if self:InFight() then
+		return self.boss.zone, self.boss.ends
+	elseif self.bossZone then
+		local start = self:BossStart()
+		if at >= start then
+			return self.bossZone, start + self.tuning.boss.limit
+		end
+	end
+	return nil
+end
+
+function World:StartBoss()
+	local tuning = self.tuning
+	local zone = self.bossZone
+	local key = self:ZoneKey(zone)
+	local data = BossData(key)
+	self.bossZone = nil
+	self.boss = {
+		key = key,
+		name = data.name,
+		zone = zone,
+		start = self.time,
+		ends = self.time + tuning.boss.limit,
+		needed = Rules.SpearsNeeded(tuning, zone),
+		hits = 0,
+		state = "fight",
+	}
+	self:Emit({ type = "bossStart", name = data.name, needed = self.boss.needed, limit = tuning.boss.limit })
+end
+
+-- Drops an entity, and its timeline record (so tests don't count it).
+local function Forget(entity)
+	if entity.record then
+		entity.record.code = "."
+	end
+end
+
+function World:EndBoss(result)
+	local tuning = self.tuning
+	local boss = self.boss
+	boss.state = result
+	boss.endedAt = self.time
+	local points = result == "driven" and tuning.points.bossDriven or tuning.points.bossSurvived
+	self.bossPoints = self.bossPoints + points
+	if result == "driven" then
+		self.bossesDriven = self.bossesDriven + 1
+	else
+		self.bossesSurvived = self.bossesSurvived + 1
+	end
+
+	-- The boss takes what it hasn't thrown yet with it, and spears go too.
+	local last = self.time
+	local kept = 0
+	local entities = self.entities
+	local count = #entities
+	for index = 1, count do
+		local entity = entities[index]
+		local keep = true
+		if entity.role == "spear" then
+			keep = false
+		elseif entity.thrown then
+			if entity.phase == "waiting" then
+				keep = false
+			else
+				last = math.max(last, entity.arrive)
+			end
+		end
+		if keep then
+			kept = kept + 1
+			entities[kept] = entity
+		else
+			Forget(entity)
+		end
+	end
+	for index = kept + 1, count do
+		entities[index] = nil
+	end
+
+	-- Ordinary chunks start again after the last hazard still coming, and far
+	-- enough ahead to come out of the fog like any other.
+	self.cursor = math.max(self.time + tuning.spawnAhead / self.speed, last + Rules.Gap(tuning, boss.zone))
+	self.bossFull = nil
+	local every = tuning.boss.every
+	self.bossZone = self:FindBossZone(boss.zone + self.rng:Int(every[1], every[2]))
+	self:Emit({ type = "bossEnd", result = result, name = boss.name, points = points })
+end
+
+function World:UpdateBoss()
+	if self:InFight() then
+		if self.bossBeaten then
+			self.bossBeaten = nil
+			self:EndBoss("driven")
+		elseif self.time >= self.boss.ends then
+			self:EndBoss("survived")
+		end
+	elseif self.bossZone and self.time >= self:BossStart() then
+		self:StartBoss()
+	end
+end
+
+-- A spear grabbed in a fight is thrown at the boss.
+function World:HitBoss()
+	local boss = self.boss
+	if not self:InFight() then
+		return
+	end
+	local points = self.tuning.points.spear
+	boss.hits = boss.hits + 1
+	self.spearHits = self.spearHits + 1
+	self.bossPoints = self.bossPoints + points
+	self:Emit({ type = "spear", hits = boss.hits, needed = boss.needed, points = points })
+	if boss.hits >= boss.needed then
+		-- Ended after this step's entity pass, which mustn't see the list change.
+		self.bossBeaten = true
+	end
+end
+
 -- Spawning ------------------------------------------------------------------
 
 function World:AddEntity(role, lane, arrive, z)
@@ -156,9 +332,13 @@ end
 
 local POWERUP_NAMES = { "magnet", "goldRush", "shield", "windRider", "stampede" }
 
-function World:PickPowerup(zone)
+-- noFlight leaves the Wind Rider out, so a flight never runs into a boss.
+function World:PickPowerup(zone, noFlight)
 	local weights = self.tuning.powerupWeights
 	return Random.Weighted(POWERUP_NAMES, function(name)
+		if noFlight and name == "windRider" then
+			return 0
+		end
 		return weights[name].minZone <= zone and weights[name].weight or 0
 	end, self.rng:Next()) or "magnet"
 end
@@ -201,18 +381,148 @@ function World:SpawnAlliance(items, start, arrive, zone)
 	end
 end
 
+function World:Record(arrive, lane, code)
+	if self.timeline then
+		local record = { t = arrive, lane = lane, code = code }
+		self.timeline[#self.timeline + 1] = record
+		return record
+	end
+end
+
+-- Spears go where a runner can take one and still get through the rest of
+-- the chunk: a lane with nothing solid close by, from which every later row
+-- can still be passed. `hazards` are the chunk's items at run times, sorted.
+function World:SpearSafe(hazards, lane, at)
+	local later = {}
+	for _, item in ipairs(hazards) do
+		if item.lane == lane and math.abs(item.t - at) < 0.45 then
+			return false
+		end
+		if item.t > at then
+			later[#later + 1] = item
+		end
+	end
+	return (Patterns.Feasible(later, self.tuning, { { lane = lane, t = at, jump = NEVER, duck = NEVER } }))
+end
+
+-- Places up to `count` spears spread between `from` and `to` (searching back
+-- as far as `earliest`), at least half a second apart. Returns how many it
+-- placed.
+function World:PlaceSpears(hazards, from, to, count, earliest)
+	earliest = earliest or from
+	local placedAt = {}
+	for index = 1, count do
+		local base = from + (to - from) * (index - 0.5) / count
+		local placed = false
+		for step = 0, 12 do
+			-- Search outward from the even spot: +0.15, -0.15, +0.3, ...
+			local at = base + math.ceil(step / 2) * 0.15 * (step % 2 == 0 and -1 or 1)
+			local spaced = at >= earliest and at <= to
+			for _, other in ipairs(placedAt) do
+				if math.abs(other - at) < 0.5 then
+					spaced = false
+				end
+			end
+			if spaced then
+				local lanes = { 1, 2, 3 }
+				self.rng:Shuffle(lanes)
+				for _, lane in ipairs(lanes) do
+					if self:SpearSafe(hazards, lane, at) then
+						self:AddEntity("spear", lane, at, GROUND_TOKEN_Z)
+						self:Record(at, lane, "S")
+						placedAt[#placedAt + 1] = at
+						placed = true
+						break
+					end
+				end
+			end
+			if placed then
+				break
+			end
+		end
+	end
+	return #placedAt
+end
+
+-- A chunk the boss throws: the pattern's hazards (see BOSS_CODE) and spears
+-- in safe spots. Returns false when there's no room before the boss gives up.
+function World:SpawnBossChunk(zone, ends)
+	local tuning = self.tuning
+	if self.bossFull == zone then
+		return false
+	end
+	-- A pattern with hazards that ends before the boss gives up.
+	local tempo = Rules.Tempo(tuning, zone)
+	local room = ends - tuning.zoneBreather - self.cursor
+	local pattern, mirrored = Patterns.Pick(self.rng, zone, tuning.duckEnabled, function(item)
+		return Patterns.HasHazard(item) and Patterns.Duration(item, tempo) <= room
+	end)
+	if not pattern then
+		-- None fits: no more throws this fight.
+		self.bossFull = zone
+		return false
+	end
+	local duration = Patterns.Duration(pattern, tempo)
+	local hazards = {}
+	for _, item in ipairs(Patterns.Expand(pattern, tempo, mirrored, tuning.duckEnabled)) do
+		local code = BOSS_CODE[item.code]
+		if code then
+			local arrive = self.cursor + item.t
+			local entity = self:AddEntity(CODE_ROLE[code], item.lane, arrive, 0)
+			entity.thrown = true
+			entity.phase = "waiting"
+			entity.record = self:Record(arrive, item.lane, code)
+			hazards[#hazards + 1] = { t = arrive, lane = item.lane, code = code }
+		end
+	end
+	table.sort(hazards, function(a, b)
+		return a.t < b.t
+	end)
+
+	-- Spears: spearSupply times those needed over the fight, shared out over
+	-- the throws still to come (a little ahead, so none are left over), and
+	-- placed up to 0.6 s before the next chunk so any lane can be reached for
+	-- it, and no nearer than 0.45 s after the last one.
+	local gap = Rules.Gap(tuning, zone)
+	local plan = self.spearPlan
+	if not plan or plan.zone ~= zone then
+		plan = { zone = zone, left = math.ceil(Rules.SpearsNeeded(tuning, zone) * tuning.boss.spearSupply) }
+		self.spearPlan = plan
+	end
+	local window = duration + gap
+	local remaining = math.max(window, ends - tuning.zoneBreather - self.cursor)
+	local count = math.min(plan.left, math.ceil(plan.left * window / remaining))
+	local earliest = self.cursor - math.max(0, gap - 0.45)
+	plan.left = plan.left - self:PlaceSpears(hazards, self.cursor, self.cursor + duration + math.max(0, gap - 0.6), count, earliest)
+	self.cursor = self.cursor + duration + gap
+	return true
+end
+
+-- Places the next chunk. Returns false when nothing can be placed yet (the
+-- boss is still out and has no room for another throw).
 function World:SpawnChunk()
 	local tuning = self.tuning
-	local zone = Rules.ZoneIndex(tuning, self.cursor)
+	local fightZone, fightEnds = self:FightAt(self.cursor)
+	if fightZone then
+		return self:SpawnBossChunk(fightZone, fightEnds)
+	end
+
+	local zone = Rules.ZoneIndex(tuning, self.cursor - self.paused)
 	local pattern, mirrored = Patterns.Pick(self.rng, zone, tuning.duckEnabled)
 	local tempo = Rules.Tempo(tuning, zone)
 	local duration = Patterns.Duration(pattern, tempo)
 
 	-- Keep zone changes clear, so the speed bump never lands mid-chunk.
-	local boundary = zone * tuning.zoneLength
+	local boundary = zone * tuning.zoneLength + self.paused
 	if self.cursor + duration > boundary - tuning.zoneBreather then
 		self.cursor = boundary + tuning.zoneBreather
-		return
+		return true
+	end
+	-- And clear the road for a boss: its first throw arrives leadIn after it.
+	local bossStart = self.bossZone and self:BossStart()
+	if bossStart and self.cursor + duration > bossStart - tuning.zoneBreather then
+		self.cursor = math.max(self.cursor, bossStart + tuning.boss.leadIn)
+		return true
 	end
 
 	local items = Patterns.Expand(pattern, tempo, mirrored, tuning.duckEnabled)
@@ -222,7 +532,9 @@ function World:SpawnChunk()
 		if code == "P" then
 			if arrive - self.lastPowerupTime >= tuning.powerupMinGap then
 				self.lastPowerupTime = arrive
-				self:AddEntity(self:PickPowerup(zone), item.lane, arrive, GROUND_TOKEN_Z)
+				-- No Wind Rider whose flight could still be on when a boss turns up.
+				local noFlight = bossStart and arrive + tuning.durations.windRider + 2 > bossStart
+				self:AddEntity(self:PickPowerup(zone, noFlight), item.lane, arrive, GROUND_TOKEN_Z)
 			else
 				code = "c"
 				self:AddEntity("coin", item.lane, arrive, GROUND_TOKEN_Z)
@@ -237,13 +549,12 @@ function World:SpawnChunk()
 		else
 			self:AddEntity(CODE_ROLE[code], item.lane, arrive, 0)
 		end
-		if self.timeline then
-			self.timeline[#self.timeline + 1] = { t = arrive, lane = item.lane, code = code }
-		end
+		self:Record(arrive, item.lane, code)
 	end
 	local gap = Rules.Gap(tuning, zone)
 	self:SpawnAlliance(items, self.cursor, self.cursor + duration + gap / 2, zone)
 	self.cursor = self.cursor + duration + gap
+	return true
 end
 
 function World:SpawnSkyTokens()
@@ -299,7 +610,7 @@ end
 
 function World:UpdateZone()
 	local tuning = self.tuning
-	local index = Rules.ZoneIndex(tuning, self.time)
+	local index = Rules.ZoneIndex(tuning, self.course)
 	if index ~= self.zoneIndex then
 		local fromSpeed = self.baseSpeed
 		self.zoneIndex = index
@@ -311,7 +622,7 @@ end
 
 function World:UpdateSpeed(h)
 	local tuning = self.tuning
-	self.baseSpeed = Rules.Speed(tuning, self.time)
+	self.baseSpeed = Rules.Speed(tuning, self.course)
 	local target = self.powerups.stampede and 1 or 0
 	local rate = h / tuning.stampedeRamp
 	if self.stampedeBlend < target then
@@ -352,6 +663,9 @@ function World:Collect(entity)
 	local role = entity.role
 	if Rules.POWERUP[role] then
 		self:ApplyPowerup(role)
+		return
+	elseif role == "spear" then
+		self:HitBoss()
 		return
 	end
 	local points = Rules.TokenValue(self.tuning, role, self.powerups.goldRush ~= nil)
@@ -415,6 +729,11 @@ function World:Tick(h)
 	local runner = self.runner
 
 	self.time = self.time + h
+	-- The zone clock stands still while a boss is out.
+	if self:InFight() then
+		self.paused = self.paused + h
+	end
+	self.course = self.time - self.paused
 	self:UpdateZone()
 	self:UpdatePowerups(h)
 	self:UpdateSpeed(h)
@@ -422,7 +741,9 @@ function World:Tick(h)
 	self.timePoints = self.timePoints + Rules.TimeRate(tuning, self.zoneIndex) * h
 
 	while self.cursor - self.time <= tuning.spawnAhead / self.speed do
-		self:SpawnChunk()
+		if not self:SpawnChunk() then
+			break
+		end
 	end
 	if self.powerups.windRider then
 		self:SpawnSkyTokens()
@@ -450,6 +771,14 @@ function World:Tick(h)
 			closing = closing * (1 - tuning.alliance.speedShare)
 		end
 		entity.y = (entity.arrive - self.time) * closing
+		if entity.thrown and entity.phase ~= "landed" then
+			-- Once thrown it stays thrown, and once down it stays down, even if
+			-- the speed (and so where throws leave and land) changes.
+			local phase = Rules.ThrowPhase(tuning, entity.y, self.speed)
+			if phase ~= "waiting" then
+				entity.phase = phase
+			end
+		end
 
 		local keep = true
 		if entity.y < tuning.despawnBehind then
@@ -484,5 +813,9 @@ function World:Tick(h)
 	for index = kept + 1, count do
 		entities[index] = nil
 	end
-	self.score = Rules.Score(self.tokenPoints, self.timePoints, self.movePoints)
+	-- A deciding spear counts even if something hit you in the same step.
+	if not self.over or self.bossBeaten then
+		self:UpdateBoss()
+	end
+	self.score = Rules.Score(self.tokenPoints, self.timePoints, self.movePoints, self.bossPoints)
 end

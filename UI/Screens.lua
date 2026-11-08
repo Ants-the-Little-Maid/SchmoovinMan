@@ -153,7 +153,7 @@ function Screens:BuildStart(layer)
 	-- Held to the panel's width, so the longer score line wraps.
 	footnote:SetPoint("RIGHT", powerups, "RIGHT")
 	footnote:SetJustifyH("LEFT")
-	footnote:SetText("Each new zone speeds you up. Score = tokens + time + jumps (+2), ducks (+3) and Alliance joggers knocked over (+5).")
+	footnote:SetText("Each new zone speeds you up. Score = tokens + time + jumps (+2), ducks (+3), Alliance joggers knocked over (+5) and bosses (+50 a spear, +500 driven off, +150 outlasted).")
 	self.footnote = footnote
 end
 
@@ -282,21 +282,24 @@ function Screens:BuildGameOver(layer)
 	self.moveLabel, self.moveValue = Row(results)
 	self.moveLabel:SetPoint("TOPLEFT", 22, -184)
 	self.moveValue:SetPoint("TOPRIGHT", -22, -184)
+	self.bossLabel, self.bossValue = Row(results)
+	self.bossLabel:SetPoint("TOPLEFT", 22, -210)
+	self.bossValue:SetPoint("TOPRIGHT", -22, -210)
 	local totalLabel
 	totalLabel, self.totalValue = Row(results, "Total", "", 20)
 	totalLabel:SetTextColor(UI.Hex(C.gold))
 	self.totalValue:SetTextColor(UI.Hex(C.gold))
-	totalLabel:SetPoint("TOPLEFT", 22, -212)
-	self.totalValue:SetPoint("TOPRIGHT", -22, -212)
+	totalLabel:SetPoint("TOPLEFT", 22, -238)
+	self.totalValue:SetPoint("TOPRIGHT", -22, -238)
 
 	local bottom = results:CreateTexture(nil, "ARTWORK")
 	bottom:SetColorTexture(UI.Hex(C.divider))
 	bottom:SetHeight(1)
-	bottom:SetPoint("TOPLEFT", 22, -244)
-	bottom:SetPoint("TOPRIGHT", -22, -244)
+	bottom:SetPoint("TOPLEFT", 22, -270)
+	bottom:SetPoint("TOPRIGHT", -22, -270)
 
 	self.personalBadge = UI.Panel(results, "2f4a1a", 1, C.green)
-	self.personalBadge:SetPoint("TOPLEFT", 22, -258)
+	self.personalBadge:SetPoint("TOPLEFT", 22, -284)
 	self.personalBadge:SetSize(110, 24)
 	self.personalText = UI.Text(self.personalBadge, 13, "d8f2b0")
 	self.personalText:SetPoint("CENTER")
@@ -437,7 +440,11 @@ function Screens:ShowGameOver(world, entry, personalRank, guildRank, isBest)
 	else
 		cause = CRASH_TEXT[world.crashRole] or "Run ended"
 	end
-	self.crashText:SetText(string.format("%s in %s (zone %d).", cause, zoneName, world.zoneIndex))
+	if world:InFight() then
+		self.crashText:SetText(string.format("%s in %s (zone %d), fighting %s.", cause, zoneName, world.zoneIndex, world.boss.name))
+	else
+		self.crashText:SetText(string.format("%s in %s (zone %d).", cause, zoneName, world.zoneIndex))
+	end
 
 	self.timeLabel:SetText("Time survived " .. UI.FormatTime(world.time))
 	self.timeValue:SetText(UI.FormatNumber(world.timePoints))
@@ -446,6 +453,8 @@ function Screens:ShowGameOver(world, entry, personalRank, guildRank, isBest)
 	self.tokenValue:SetText(UI.FormatNumber(world.tokenPoints))
 	self.moveLabel:SetText(string.format("Jumps %d, ducks %d, knocks %d", world.jumps or 0, world.ducks or 0, world.knocks or 0))
 	self.moveValue:SetText(UI.FormatNumber(world.movePoints or 0))
+	self.bossLabel:SetText(string.format("Bosses: %d driven off, %d outlasted (%d spear%s)", world.bossesDriven or 0, world.bossesSurvived or 0, world.spearHits or 0, world.spearHits == 1 and "" or "s"))
+	self.bossValue:SetText(UI.FormatNumber(world.bossPoints or 0))
 	self.totalValue:SetText(UI.FormatNumber(world.score))
 
 	self.personalBadge:SetShown(personalRank ~= nil)

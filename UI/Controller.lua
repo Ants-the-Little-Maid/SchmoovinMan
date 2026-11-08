@@ -222,8 +222,21 @@ function Controller:Resume()
 	self.held = {}
 end
 
+-- The title bar's pause button works only during a run, so it's greyed out
+-- on the start and game-over screens (and once the runner has crashed), and
+-- reads "Resume" while paused. Checked each frame, set on a change.
+function Controller:UpdatePauseButton()
+	local state = (self.state == "running" and self.overAt) and "crashed" or self.state
+	if state ~= self.pauseButtonState then
+		self.pauseButtonState = state
+		ns.Window.SetPauseButton(self.frame.pauseButton, state == "running" or state == "paused", state == "paused" and "Resume" or "Pause")
+	end
+end
+
+-- The Pause button. A run that has crashed is over, though it stays on
+-- screen for a moment, so it can't be paused then (nor with P or Esc).
 function Controller:TogglePause()
-	if self.state == "running" then
+	if self.state == "running" and not self.overAt then
 		self:Pause("")
 	elseif self.state == "paused" then
 		self:Resume()
@@ -273,6 +286,23 @@ function Controller:HandleEvents(now)
 		elseif kind == "knock" then
 			ns.PlaySound("knock")
 			self:SayKnock()
+		elseif kind == "bossStart" then
+			ns.PlaySound("bossStart")
+			self.hud:ShowMessage("boss", "BOSS", event.name, string.format("Grab %d spears to drive them off, or survive %d seconds", event.needed, event.limit), now)
+			self:SayNow(ns.Assets.quips.bossStart)
+		elseif kind == "spear" then
+			ns.PlaySound("spear")
+		elseif kind == "bossEnd" then
+			local fight = world.boss
+			if event.result == "driven" then
+				ns.PlaySound("bossDriven")
+				self.hud:ShowMessage("won", "DRIVEN OFF", event.name, string.format("+%d  -  %d spears in %.1f s", event.points, fight.hits, fight.endedAt - fight.start), now)
+				self:SayNow(ns.Assets.quips.bossDriven)
+			else
+				ns.PlaySound("bossSurvived")
+				self.hud:ShowMessage("won", "SURVIVED", event.name, string.format("Gives up and leaves  -  +%d", event.points), now)
+				self:SayNow(ns.Assets.quips.bossSurvived)
+			end
 		elseif kind == "crash" then
 			ns.PlaySound("crash")
 			self:HideBubbles()
@@ -281,7 +311,7 @@ function Controller:HandleEvents(now)
 			local zone = ns.ZonesByKey[event.key]
 			self.zoneKey = event.key
 			self.renderer:SetZone(zone)
-			local toSpeed = Rules.Speed(world.tuning, world.time + world.tuning.bumpTime)
+			local toSpeed = Rules.Speed(world.tuning, world.course + world.tuning.bumpTime)
 			self.hud:ShowBanner(zone.name, event.fromSpeed, toSpeed, now)
 			self.flashAt = now
 			self.frame.flash:SetColorTexture(zone.fog.color[1], zone.fog.color[2], zone.fog.color[3], 1)
@@ -292,6 +322,7 @@ end
 
 function Controller:OnUpdate(elapsed)
 	local now = GetTime()
+	self:UpdatePauseButton()
 	local world = self.world
 	if not world then
 		return
@@ -324,18 +355,23 @@ end
 
 -- Speech bubble ------------------------------------------------------------------
 
--- Knocking an Alliance jogger always gets a line, cutting off any chatter
--- (and any reply still to come, since the runner has moved on).
-function Controller:SayKnock()
+-- Some moments always get a line from the runner (knocking an Alliance
+-- jogger, a boss turning up or leaving), cutting off any chatter and any reply
+-- still to come, since the runner has moved on.
+function Controller:SayNow(lines)
 	local world = self.world
 	local quips = ns.Assets.quips
 	local renderer = self.renderer
 	self.pendingReply = nil
 	self.replyBubble:Hide()
-	self.bubble:Say(quips.knock[math.random(#quips.knock)], world.time + quips.duration, function()
+	self.bubble:Say(lines[math.random(#lines)], world.time + quips.duration, function()
 		return renderer:RunnerHeadPoint(self.world)
 	end)
 	self.nextQuip = world.time + quips.duration + quips.gap
+end
+
+function Controller:SayKnock()
+	self:SayNow(ns.Assets.quips.knock)
 end
 
 function Controller:HideBubbles()
@@ -417,7 +453,9 @@ function Controller:HandleKey(key)
 			return true
 		end
 		if key == "ESCAPE" or key == "P" then
-			self:Pause("")
+			if not self.overAt then
+				self:Pause("")
+			end
 			return true
 		end
 		return false

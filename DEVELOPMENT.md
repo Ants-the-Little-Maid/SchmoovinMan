@@ -83,7 +83,7 @@ The S, M, L and XL buttons in the title bar set the window to 75%, 100%, 130% or
 | Change lane | A / D, Left / Right |
 | Jump | W, Up, Space |
 | Duck under high bars | S, Down. Pressed in the air, you drop fast and duck on landing |
-| Pause | Esc or P. While paused, P resumes and Esc closes the window |
+| Pause | Esc or P, or the Pause button at the left of the title bar (greyed out outside a run and once the runner has crashed, "Resume" while paused). While paused, P resumes and Esc closes the window |
 | Start or restart | Enter or R (Space also starts from the start screen) |
 
 Only these keys are kept from the rest of WoW while a run is live; anything else (chat, screenshots) still works. You can't start a run in combat, and entering combat pauses the run. Closing the window pauses it too.
@@ -93,12 +93,13 @@ Only these keys are kept from the rest of WoW while a run is live; anything else
 | | |
 |---|---|
 | Zones | Mulgore first, then the other 15 in a random order, with no repeats until all have been seen: The Barrens, Thousand Needles, Ashenvale, Burning Steppes, Silithus, Un'Goro Crater, Winterspring, Westfall, Moonglade, Stormwind City, Darnassus, Ironforge, Thunder Bluff, Orgrimmar and Undercity. The cities use Classic tilesets and racial props; city chargers are guards (Stormwind, Ironforge) or local beasts |
-| Zone length | 25 seconds by default (Normal). Frantic 15, Relaxed 35 and Marathon 45 are on the start screen. Each zone is one difficulty step, so shorter zones bring speed-ups and new obstacles sooner. Saved scores record the zone length used |
+| Zone length | 25 seconds by default (Normal). Frantic 15, Relaxed 35 and Marathon 45 are on the start screen. Each zone is one difficulty step, so shorter zones bring speed-ups and new obstacles sooner. Time spent fighting a boss doesn't count toward a zone. Saved scores record the zone length used |
 | Speed | Starts at 11 yd/s, rises 0.03 yd/s every second, and jumps 2.2 yd/s on entering each zone, up to 38 yd/s |
 | Obstacles | Low (jump), high bar on two posts (duck, from zone 2), block, two-lane wall (from zone 2), charging creature (from zone 3), combos from zone 4 |
 | Tokens | Gold coins 10 points, gems 50. Lines, jump arcs and sky lines while flying |
 | Time points | 10 per second, plus 2 per second for each zone reached |
 | Move points | +2 per low obstacle jumped and +3 per high bar ducked, when it's in your path and you make the move. Flying, Stampede smashes, shield hits and invulnerable pass-throughs don't count. +5 per Alliance jogger knocked over |
+| Bosses | The first boss comes in a random zone from 3 to 6, and the next 3 to 6 zones after each fight. A zone without a boss (Thunder Bluff, Orgrimmar, Undercity for now) passes it on to the next zone that has one. Each of the other 12 zones has its own, in `Data/Zones.lua`. The boss turns up 4 seconds into its zone, 58 yards up the road. The chase camera's view spans only about 28 degrees top to bottom (measured from a screenshot), so a boss that far out stands above its top edge: while a boss is out the camera moves over 1.2 seconds to a fight view (5.5 yards up and 10 behind the runner, tilted 12.5 degrees, field of view 1.2) that shows even a 6-yard boss under the boss bar, at the cost of the runner hiding 9 yards of its lane rather than 6. Fog is measured from the camera, so the fog also draws back until the boss is at most 15% of the way into it. The zone clock (zones, speed-ups) stops until it leaves. It throws that zone's hazards, picked from the same fair patterns as usual (a charger becomes a block); each leaves its hand 2.4 seconds before reaching you (from no more than 54 yards ahead) and lands 1.1 seconds before (about 1 second near top speed), with a red mark where it will land. Spears turn up in safe spots: a lane with nothing solid within 0.45 seconds, from which the rest of the chunk can still be passed. Grab one and it's thrown at the boss. Spears needed: 3 in zones 3 and 4, then one more every 2 zones; a fight offers 1.6 times that. Enough hits drive it off (+500, plus +50 a spear); otherwise it gives up after 25 seconds (+150). No Wind Rider is placed where its flight could still be on when a boss turns up. Numbers are in `Tuning.boss` |
 | Joggers | Orcs, Trolls and Tauren of both body types jog along either side of the road at 45% of your speed, one every 30-70 yards. They're scenery: they never block you. Tauren are about one jogger in six (their `weight` in `Data/Assets.lua`), since they look like the runner and stand out. Ten famous Horde faces (Thrall, Cairne, Vol'jin, Sylvanas, Varimathras, Eitrigg, Magatha, Hamuul, Drek'Thar, Saurfang) turn up now and then, with their own lines and replies |
 | Alliance joggers | In the gap after a chunk, 35% of the time, an Alliance civilian (human, dwarf, gnome or night elf) jogs away from you in a lane at 45% of your speed. The lane is one with nothing solid along the stretch they'll cover before you reach them, so they never run through a hazard. Running into one knocks them flying for +5 and a one-liner; jumping over them or being in another lane leaves them be. They never end a run |
 | Speech bubbles | Passing an orc or troll, your Tauren says something for 2.2 seconds, over its own head: "On your left!" or "On your right!" (matching the jogger's side) half the time, otherwise a line such as "OUTTA MY WAY I GOTTA SCHMOOVE". Passing a fellow Tauren, your Tauren compliments them a few yards before reaching them ("Hey Schmoover!", "Lookin' schmoove!"...), and they reply over their own head a moment later ("SCHMOOVIN GOOD!", "Could it be? The Schmoover!?"...). The compliment and reply lists are only used with Tauren. All lines are in `Data/Assets.lua` under `quips` |
@@ -155,7 +156,7 @@ A design mock-up was approved on 2026-11-06. It shows the live run, a zone chang
 | Zone change as an instant switch | A fog-coloured flash covers the switch | Simpler than a full crossfade of the ground |
 | One window size | S, M, L and XL size buttons in the title bar | Asked for after the 0.1.0 look |
 | Plain road | Dashed lane lines and solid road edges | Lanes weren't clear enough in 0.1.0 |
-| Timer panel with border, big time, two text lines | Faint borderless panel, smaller time, one line of zone details | Asked for after the 0.2.0 look, to be less obtrusive |
+| Timer and zone details top centre; boss bar under them; banners mid-screen | Run time, zone, speed and next-zone bar in the score panel (top left); the top centre holds only banners and, in a boss fight, a slim see-through boss bar that fades in as the banner goes | Asked for after the 0.10.0 boss look: the boss bar and banners covered the road and the boss |
 | Lanes 2 yards apart | Lanes 2.6 yards apart, road 7.8 yards wide | Asked for after the 0.2.0 look |
 | Zone length fixed | Zones button beside Start run | Asked for after the 0.3.0 look |
 
@@ -188,6 +189,6 @@ The logic tests cover scoring, the speed curve (ramp, zone bumps, cap), zone ord
 
 - The ground is a grid of small cells fixed to the world. Each shows part of one texture tile, so nothing relies on texture wrapping, and cells near the camera are 1 yard deep so their perspective bend doesn't show.
 - The ground is drawn behind the models, so a model below ground level still shows in front of it.
-- Scenery is flat-placed beside the track; it doesn't follow hills.
+- Scenery is flat-placed beside the track; it doesn't follow hills. Once a piece's size is known it moves out until its whole box, as turned, is at least 1.5 yards clear of the road edge.
 - The guild board only knows guildmates who've been online with the addon since you last logged in, or who shared a new best while you were online.
 - Ducking uses the stealth-run animation. If the Tauren has none, the game shows its fallback.

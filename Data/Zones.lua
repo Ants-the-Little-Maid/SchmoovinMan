@@ -14,6 +14,10 @@ sky = { top, bottom }, fog = { color, near, far }, light = { ambient, diffuse }
 scenery: roadside models, each scaled to `height` yards.
 obstacles: model lists per role (low, high, block, wall), each scaled to the
   role's size. charger: creature displays that run at you.
+boss: the zone's boss (see Tuning.boss): name, height in yards, and models,
+  the boss's Forever display (from Wowhead's Forever NPC pages, 2026-11-08)
+  then a backup. Thunder Bluff, Orgrimmar and Undercity have none for now, so
+  a boss due there waits for the next zone that has one.
 Colours are { r, g, b } from 0 to 1.
 ]]
 
@@ -100,6 +104,7 @@ ns.Zones = {
 			wall = { { fileID = 201416 }, { fileID = 201413 } }, -- barrenswagon01, bustedwagon
 		},
 		charger = { { displayID = 1532 }, { displayID = 180 } }, -- thunder lizard, raptor
+		boss = { name = "Verog the Dervish", height = 4.3, models = { { displayID = 9446 }, { displayID = 1532 } } }, -- npc 3395
 	},
 	{
 		key = "thousandneedles",
@@ -125,6 +130,7 @@ ns.Zones = {
 			wall = { { fileID = 202694 }, { fileID = 202697 } }, -- haybail back-stop, straightaway03
 		},
 		charger = { { displayID = 1308 }, { displayID = 322 } }, -- kodo, raptor
+		boss = { name = "Arnak Grimtotem", height = 4.1, models = { { displayID = 10243 }, { displayID = 1308 } } }, -- npc 10896
 	},
 	{
 		key = "ashenvale",
@@ -151,6 +157,7 @@ ns.Zones = {
 			wall = { { fileID = 201246 }, { fileID = 201247 } }, -- satyr ruin walls
 		},
 		charger = { { displayID = 1917 }, { displayID = 706 }, { displayID = 145 } }, -- stag, bear, furbolg
+		boss = { name = "Ursangous", height = 4.3, models = { { displayID = 2281 }, { displayID = 706 } } }, -- npc 12678
 	},
 	{
 		key = "burningsteppes",
@@ -177,6 +184,7 @@ ns.Zones = {
 			wall = { { fileID = 189213 }, { fileID = 189135 } }, -- boulders02, fence
 		},
 		charger = { { displayID = 1070 }, { displayID = 10193 } }, -- fire elemental, core hound
+		boss = { name = "Volchan", height = 5.4, models = { { displayID = 12232 }, { displayID = 1070 } } }, -- npc 10119
 	},
 	{
 		key = "silithus",
@@ -202,6 +210,7 @@ ns.Zones = {
 			wall = { { fileID = 202573 }, { fileID = 202565 } }, -- ruins wall, quiraj wall
 		},
 		charger = { { displayID = 91 }, { displayID = 157 }, { displayID = 92 } }, -- silithid tank, silithid, wasp
+		boss = { name = "Krellack", height = 4.1, models = { { displayID = 6068 }, { displayID = 91 } } }, -- npc 14476
 	},
 	{
 		key = "ungoro",
@@ -227,6 +236,7 @@ ns.Zones = {
 			wall = { { fileID = 202773 }, { fileID = 202774 } }, -- ungororock09/10
 		},
 		charger = { { displayID = 5238 }, { displayID = 615 } }, -- devilsaur, raptor
+		boss = { name = "King Mosh", height = 6, models = { { displayID = 5305 }, { displayID = 5238 } } }, -- npc 6584
 	},
 	{
 		key = "winterspring",
@@ -253,6 +263,7 @@ ns.Zones = {
 			wall = { { fileID = 202847 }, { fileID = 202874 } }, -- rock03, fallen tree 2
 		},
 		charger = { { displayID = 10579 }, { displayID = 21601 }, { displayID = 10914 }, { displayID = 161 } }, -- Ice Thistle Yeti, older yeti with other skins, wooly kodo, wolf
+		boss = { name = "Rak'shiri", height = 3.4, models = { { displayID = 10054 }, { displayID = 10579 } } }, -- npc 10200
 	},	{
 		key = "westfall",
 		name = "Westfall",
@@ -278,6 +289,7 @@ ns.Zones = {
 			wall = { { fileID = 190599 }, { fileID = 190536 } }, -- haywagon, brokencart
 		},
 		charger = { { displayID = 378 }, { displayID = 367 } }, -- Harvest Watcher, Harvest Golem
+		boss = { name = "Edwin VanCleef", height = 3.8, models = { { displayID = 2029 }, { displayID = 378 } } }, -- npc 639
 	},
 	{
 		key = "moonglade",
@@ -304,6 +316,7 @@ ns.Zones = {
 			wall = { { fileID = 198834 }, { fileID = 198835 } }, -- nightelfruins01/02
 		},
 		charger = { { displayID = 12236 }, { displayID = 12238 }, { displayID = 1917 } }, -- Moonkin Oracle, Vicious Owlbeast, stag
+		boss = { name = "Omen", height = 6, models = { { displayID = 15879 }, { displayID = 12238 } } }, -- npc 15467
 	},
 	{
 		key = "stormwind",
@@ -330,6 +343,7 @@ ns.Zones = {
 			wall = { { fileID = 198288 }, { fileID = 189840 } }, -- stormwindgypsywagon01, ruinedcatapult
 		},
 		charger = { { displayID = 3167 }, { displayID = 3258 } }, -- Stormwind City Guard, Stormwind Guard
+		boss = { name = "Highlord Bolvar Fordragon", height = 4, models = { { displayID = 5566 }, { displayID = 3167 } } }, -- npc 1748
 	},
 	{
 		key = "darnassus",
@@ -356,6 +370,7 @@ ns.Zones = {
 			wall = { { fileID = 198824 }, { fileID = 198825 } }, -- newelfruin01/02
 		},
 		charger = { { displayID = 6805 }, { displayID = 1917 } }, -- Nightsaber, stag
+		boss = { name = "Tyrande Whisperwind", height = 4, models = { { displayID = 7274 }, { displayID = 6805 } } }, -- npc 7999
 	},
 	{
 		key = "ironforge",
@@ -382,6 +397,7 @@ ns.Zones = {
 			wall = { { fileID = 203230 }, { fileID = 203159 } }, -- ironforgesteamtankruined01, dunmoroghstonefence02
 		},
 		charger = { { displayID = 3524 }, { displayID = 704 } }, -- Ironforge Guard, Mountain Boar
+		boss = { name = "King Magni Bronzebeard", height = 3.6, models = { { displayID = 3597 }, { displayID = 3524 } } }, -- npc 2784
 	},
 	{
 		key = "thunderbluff",

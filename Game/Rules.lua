@@ -94,8 +94,29 @@ function Rules.Touches(ex, ey, ez, runnerX, runnerZ, runnerHeight)
 	return ez > runnerZ - 0.6 and ez < runnerZ + runnerHeight + 0.6
 end
 
-function Rules.Score(tokenPoints, timePoints, movePoints)
-	return math.floor(tokenPoints + timePoints + (movePoints or 0))
+function Rules.Score(tokenPoints, timePoints, movePoints, bossPoints)
+	return math.floor(tokenPoints + timePoints + (movePoints or 0) + (bossPoints or 0))
+end
+
+-- Spears it takes to drive off a boss met in this zone.
+function Rules.SpearsNeeded(tuning, zone)
+	local boss = tuning.boss
+	return boss.spears + math.max(0, math.floor((zone - boss.spearsFrom) / boss.spearsEvery))
+end
+
+-- Where a thrown hazard is, from its distance ahead (y) and your speed:
+-- "waiting" in the boss's hand, "flying" toward where it lands (with progress
+-- from 0 at the throw to 1 on landing) or "landed" on the road.
+function Rules.ThrowPhase(tuning, y, speed)
+	local boss = tuning.boss
+	local launch = math.min(boss.throwMax, speed * boss.throwLead)
+	local land = math.min(launch * 0.7, speed * boss.landLead)
+	if y > launch then
+		return "waiting", 0
+	elseif y > land then
+		return "flying", (launch - y) / (launch - land)
+	end
+	return "landed", 1
 end
 
 -- Points for getting past an obstacle in your path with the move it asks for:

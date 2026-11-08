@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.0 (unreleased)
+
+- Bosses: every few zones a boss blocks the road and throws hazards into your lanes, with a red mark where each will land. Grab the spears that turn up to throw them at it: enough hits drive it off for +500 (and +50 a spear), or survive 25 seconds until it gives up for +150. The first comes in zone 3 to 6 and the next 3 to 6 zones after each fight. Spears needed start at 3 and rise by one every 2 zones. The zone clock stops while a boss is out.
+- Twelve bosses, one for each zone outside the Horde capitals: Verog the Dervish, Arnak Grimtotem, Ursangous, Volchan, Krellack, King Mosh, Rak'shiri, Edwin VanCleef, Omen, Highlord Bolvar Fordragon, Tyrande Whisperwind and King Magni Bronzebeard.
+- Game over shows bosses driven off and outlasted, with their points.
+- In a boss fight the camera drops a little, levels out and widens so you can see the boss up the road, under the boss bar, and the fog draws back from it. Before, bosses stood above the top of the view, and Volchan, the Burning Steppes fire elemental, was lost in the fog as well.
+- Roadside scenery no longer reaches onto the road: big pieces, such as the trees in Un'Goro Crater, stand further out so it's clear where you can run.
+- The pause button in the title bar now says "Pause" (or "Resume"), sits at the left end away from the size and close buttons, and is greyed out outside a run.
+- The HUD keeps the road clear: run time, zone, speed and the next-zone bar moved into the score panel, and the top middle now holds only banners (zone, boss) and the boss bar during a fight.
+
 ## 0.9.1 (2026-11-07)
 
 - Fixed the runner staying giant after a Wind Rider flight, for the rest of the session.

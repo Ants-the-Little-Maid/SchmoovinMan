@@ -339,6 +339,32 @@ function Ground:DrawMarkings(distance)
 	end
 end
 
+-- Red marks where a boss's throws will land: markers = { count, [i] = { x, y,
+-- halfWidth, halfDepth, alpha } }. Drawn over the road, under the models.
+function Ground:DrawMarkers(markers)
+	self.markers = self.markers or {}
+	local textures = self.markers
+	local drawable = self.scene.calibrated
+	for index = 1, markers.count do
+		local marker = markers[index]
+		local texture = textures[index]
+		if not texture then
+			texture = self.layer:CreateTexture(nil, "BACKGROUND", nil, -3)
+			texture:SetAllPoints()
+			texture:SetColorTexture(1, 1, 1, 1)
+			textures[index] = texture
+		end
+		if not drawable then
+			texture:Hide()
+		elseif self:Strip(texture, marker.x - marker.halfWidth, marker.x + marker.halfWidth, marker.y - marker.halfDepth, marker.y + marker.halfDepth) then
+			texture:SetVertexColor(0.88, 0.21, 0.16, marker.alpha)
+		end
+	end
+	for index = markers.count + 1, #textures do
+		textures[index]:Hide()
+	end
+end
+
 function Ground:Draw(distance)
 	local width, height = self.layer:GetSize()
 	if width <= 0 or height <= 0 or not self.scene.calibrated then

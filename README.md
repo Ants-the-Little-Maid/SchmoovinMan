@@ -18,8 +18,9 @@ Open it with `/schmoove` or the kodo button on the minimap. Right-click the butt
   - Gold Rush: double token points.
   - Stampede: smash through hazards.
 - **Joggers** of the Horde jog along the roadside. Overtake them and your Tauren has something to say. Fellow Tauren have something to say back, and so do famous faces such as Thrall, Cairne, Vol'jin and Sylvanas.
+- **Bosses** block the road every few zones: Edwin VanCleef in Westfall, King Mosh in Un'Goro, King Magni in Ironforge and more, one for each zone outside the Horde capitals. A boss throws hazards into your lanes, with a red mark where each will land. Grab the spears that turn up and they're thrown at the boss: enough hits drive it off for a big bonus, or survive 25 seconds until it gives up. The zone clock stops while a boss is out.
 - **Alliance joggers** get in your lane. Run into them to knock them flying, with a one-liner from your Tauren. They never end your run, and you can jump over them if you'd rather.
-- **Scoring**: points for tokens, for time survived, and for style: +2 for every obstacle you jump over, +3 for every bar you duck under and +5 for every Alliance jogger you knock over.
+- **Scoring**: points for tokens, for time survived, and for style: +2 for every obstacle you jump over, +3 for every bar you duck under and +5 for every Alliance jogger you knock over. Bosses pay +50 a spear, +500 for driving one off and +150 for outlasting one.
 - **Scores**: a personal top 10 shared across your characters, plus a guild board with guildmates who have the addon.
 - **Your pace**: zones last 15, 25, 35 or 45 seconds, and the window comes in four sizes.
 
@@ -32,7 +33,7 @@ Every run is fair: there is always a free lane or a way to jump or duck through.
 | Change lane | A / D or Left / Right |
 | Jump | W, Up or Space |
 | Duck | S or Down (in the air: drop fast) |
-| Pause | Esc or P |
+| Pause | Esc or P, or the Pause button at the left of the title bar |
 | Start / restart | Enter or R |
 
 You can't start a run in combat, and entering combat pauses the run. Only the game's own keys are taken during a run; chat and everything else still work.

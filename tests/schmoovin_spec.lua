@@ -243,6 +243,12 @@ local function NextLane(states, startState, now)
 	return path[#path] and path[#path].lane
 end
 
+local function SortByTime(items)
+	table.sort(items, function(a, b)
+		return a.t < b.t
+	end)
+end
+
 local function PlayBot(seed, tuning, seconds)
 	local world = World.New(seed, tuning)
 	local runner = world.runner
@@ -254,6 +260,7 @@ local function PlayBot(seed, tuning, seconds)
 		if planTimer <= 0 and not runner.flying then
 			planTimer = 0.02
 			local items = {}
+			local spear
 			for _, entity in ipairs(world.entities) do
 				local code = ROLE_CODE[entity.role]
 				-- A jump or duck already under way counts as done in this lane, and
@@ -264,14 +271,37 @@ local function PlayBot(seed, tuning, seconds)
 				if code and not entity.smashed and entity.arrive > world.time - 0.1 then
 					items[#items + 1] = { t = entity.arrive, lane = entity.lane, code = code }
 				end
+				if entity.role == "spear" and entity.arrive > world.time + 0.05 and (not spear or entity.arrive < spear.arrive) then
+					spear = entity
+				end
 			end
-			table.sort(items, function(a, b)
-				return a.t < b.t
-			end)
+			SortByTime(items)
 			local start = { lane = runner.lane, t = world.time - Patterns.LIMITS.reaction, jump = lastJump, duck = lastDuck }
-			local ok, states = Patterns.Feasible(items, tuning, { start })
-			if ok and #items > 0 then
-				target = NextLane(states, start, world.time) or target
+			-- Go for the next spear if a safe path takes it: plan as if the other
+			-- lanes were blocked when it arrives.
+			local planned = false
+			if spear then
+				local withSpear = {}
+				for _, item in ipairs(items) do
+					withSpear[#withSpear + 1] = item
+				end
+				for lane = 1, 3 do
+					if lane ~= spear.lane then
+						withSpear[#withSpear + 1] = { t = spear.arrive, lane = lane, code = "B" }
+					end
+				end
+				SortByTime(withSpear)
+				local ok, states = Patterns.Feasible(withSpear, tuning, { start })
+				if ok then
+					target = NextLane(states, start, world.time) or target
+					planned = true
+				end
+			end
+			if not planned then
+				local ok, states = Patterns.Feasible(items, tuning, { start })
+				if ok and #items > 0 then
+					target = NextLane(states, start, world.time) or target
+				end
 			end
 		end
 
@@ -314,8 +344,14 @@ for seed = 1, seedCount do
 		if seed == 1 and duck then
 			check("bot collects tokens", world.tokens > 50, world.tokens)
 			check("score includes time", world.score >= math.floor(world.timePoints), world.score)
-			check("zones advance", world.zoneIndex >= math.floor(minutes * 60 / Tuning.zoneLength), world.zoneIndex)
+			-- Zones follow the zone clock, which stops for bosses.
+			check("zones advance", world.zoneIndex >= math.floor(world.course / Tuning.zoneLength), world.zoneIndex)
 			check("bot earns jump and duck points", world.movePoints > 0 and world.jumps > 0, world.movePoints)
+			if minutes >= 3 then
+				check("bot meets bosses", world.bossesDriven + world.bossesSurvived > 0, world.bossesDriven + world.bossesSurvived)
+				check("bot drives off a boss by taking spears", world.bossesDriven > 0 and world.spearHits >= Tuning.boss.spears, world.spearHits)
+				check("score includes boss points", world.score >= math.floor(world.timePoints + world.bossPoints), world.score)
+			end
 		end
 	end
 end
@@ -546,6 +582,284 @@ do
 		end
 	end
 	check("Alliance joggers never jog through a hazard", clashes == 0, clashes)
+end
+
+-- Bosses ----------------------------------------------------------------------------
+
+do
+	check("3 spears in zone 3", Rules.SpearsNeeded(Tuning, 3) == 3)
+	check("3 spears in zone 4", Rules.SpearsNeeded(Tuning, 4) == 3)
+	check("one more spear every 2 zones", Rules.SpearsNeeded(Tuning, 5) == 4 and Rules.SpearsNeeded(Tuning, 6) == 4 and Rules.SpearsNeeded(Tuning, 7) == 5, Rules.SpearsNeeded(Tuning, 7))
+	check("score adds boss points", Rules.Score(10, 20, 3, 500) == 533)
+	local speed = 20
+	check("a far throw waits in the boss's hand", Rules.ThrowPhase(Tuning, 60, speed) == "waiting")
+	local phase, progress = Rules.ThrowPhase(Tuning, 30, speed)
+	check("a mid throw is flying", phase == "flying" and progress > 0 and progress < 1, phase)
+	check("a near throw has landed", Rules.ThrowPhase(Tuning, 5, speed) == "landed")
+	local landsEarly = true
+	for speed = Tuning.baseSpeed, Tuning.maxSpeed do
+		-- 0.9 s away: on the road already, and thrown from no nearer than 1.5 s.
+		if Rules.ThrowPhase(Tuning, speed * 0.9, speed) ~= "landed" or Rules.ThrowPhase(Tuning, speed * 1.5, speed) == "landed" then
+			landsEarly = false
+		end
+	end
+	check("a throw lands at least 0.9 s before reaching you, at every speed", landsEarly)
+end
+
+-- Zones that have a boss, from the zone data.
+local function HasBoss(key)
+	return ns.ZonesByKey[key].boss ~= nil
+end
+
+check("no boss in Thunder Bluff, Orgrimmar or Undercity", not HasBoss("thunderbluff") and not HasBoss("orgrimmar") and not HasBoss("undercity"))
+
+-- Plays an untouchable run without a bot, logging fights and Wind Rider flights.
+local function BossRun(seed, seconds)
+	local world = World.New(seed, copy(Tuning))
+	local fights, flights, spears = {}, {}, {}
+	while world.time < seconds do
+		world.safeLeft = 1
+		world:Step(0.05)
+		for _, event in ipairs(world:DrainEvents()) do
+			if event.type == "bossStart" then
+				fights[#fights + 1] = { zone = world.zoneIndex, key = world.zoneKey, start = world.time, course = world.course, needed = event.needed, spears = 0 }
+			elseif event.type == "bossEnd" then
+				local fight = fights[#fights]
+				fight.ends, fight.endCourse, fight.result, fight.points = world.time, world.course, event.result, event.points
+			elseif event.type == "powerup" and event.role == "windRider" then
+				flights[#flights + 1] = world.time
+			elseif event.type == "zone" and fights[#fights] and not fights[#fights].ends then
+				fights[#fights].zoneChanged = true
+			end
+		end
+		for _, entity in ipairs(world.entities) do
+			if entity.role == "spear" and not entity.counted then
+				entity.counted = true
+				spears[#spears + 1] = entity.arrive
+			end
+		end
+	end
+	-- Spears spawn ahead, so they're counted against the fight they arrive in.
+	for _, fight in ipairs(fights) do
+		for _, at in ipairs(spears) do
+			if at >= fight.start and at <= (fight.ends or math.huge) then
+				fight.spears = fight.spears + 1
+			end
+		end
+	end
+	return world, fights, flights
+end
+
+do
+	local scheduleOk, gapOk, bosslessOk, pauseOk, supplyOk, flightOk = true, true, true, true, true, true
+	local scheduleDetail, supplyDetail
+	local met = 0
+	for seed = 1, math.max(4, math.min(seedCount, 8)) do
+		local world, fights, flights = BossRun(seed, 420)
+		met = met + #fights
+		-- The first boss is in zone 3 to 6, or later only when every zone from
+		-- 6 up to it has no boss (a boss due there is passed on).
+		local first = fights[1]
+		if not first or first.zone < 3 then
+			scheduleOk = false
+		else
+			for zone = 6, first.zone - 1 do
+				if HasBoss(world:ZoneKey(zone)) then
+					scheduleOk = false
+					scheduleDetail = ("seed %d: first boss in zone %d"):format(seed, first.zone)
+				end
+			end
+		end
+		for index, fight in ipairs(fights) do
+			bosslessOk = bosslessOk and HasBoss(fight.key)
+			-- 3 to 6 zones after the last, or later only when the zones from 6
+			-- on up to it have no boss.
+			if index > 1 then
+				local previous = fights[index - 1].zone
+				local ok = fight.zone - previous >= 3
+				for zone = previous + 6, fight.zone - 1 do
+					if HasBoss(world:ZoneKey(zone)) then
+						ok = false
+					end
+				end
+				if not ok then
+					gapOk = false
+					scheduleDetail = ("seed %d: bosses in zones %d and %d"):format(seed, previous, fight.zone)
+				end
+			end
+			if fight.ends then
+				-- The zone clock stood still, and the zone didn't change.
+				if math.abs(fight.endCourse - fight.course) > 0.05 or fight.zoneChanged then
+					pauseOk = false
+				end
+				if fight.spears < fight.needed then
+					supplyOk = false
+					supplyDetail = ("seed %d zone %d: %d spears for %d"):format(seed, fight.zone, fight.spears, fight.needed)
+				end
+			end
+			-- No Wind Rider flight still on when a boss turns up.
+			for _, at in ipairs(flights) do
+				if at < fight.start and at + Tuning.durations.windRider > fight.start - 0.5 then
+					flightOk = false
+				end
+			end
+		end
+	end
+	check("bosses turn up", met > 0, met)
+	check("first boss in zone 3 to 6, or the next zone with a boss", scheduleOk, scheduleDetail)
+	check("next boss 3 to 6 zones later, or the next zone with a boss", gapOk, scheduleDetail)
+	check("bosses only in zones that have one", bosslessOk)
+	check("zone clock stops during a fight", pauseOk)
+	check("every fight offers enough spears", supplyOk, supplyDetail)
+	check("no Wind Rider flight runs into a boss", flightOk)
+end
+
+-- A fight on demand: the next boss is made due now, in the current zone.
+local function FightWorld(seed)
+	local world = World.New(seed, copy(Tuning))
+	world:Step(0.05)
+	world:DrainEvents()
+	world.entities = {}
+	world.cursor = 1e9
+	-- Due at once: the zone that has a boss is this one, already under way.
+	world.zoneKey = "westfall"
+	world.zoneOrder[world.zoneIndex] = "westfall"
+	world.bossZone = world.zoneIndex
+	world.paused = world.paused - (world:BossStart() - world.time)
+	return world
+end
+
+local function Events(world, kind)
+	local found = {}
+	for _, event in ipairs(world:DrainEvents()) do
+		if event.type == kind then
+			found[#found + 1] = event
+		end
+	end
+	return found
+end
+
+do
+	-- Taking the spears drives the boss off, for 50 each and 500 at the end.
+	local world = FightWorld(51)
+	world:Step(Tuning.step * 2)
+	local started = Events(world, "bossStart")
+	check("boss turns up when due", #started == 1 and world.boss and world.boss.name == "Edwin VanCleef", #started)
+	local needed = world.boss.needed
+	world.safeLeft = 1e9
+	for _ = 1, needed do
+		world:AddEntity("spear", world.runner.lane, world.time + 0.2, 0.9)
+		for _ = 1, 60 do
+			world:Step(Tuning.step)
+		end
+	end
+	check("spears hit the boss", world.spearHits == needed, world.spearHits)
+	check("enough spears drive the boss off", world.boss.state == "driven" and world.bossesDriven == 1)
+	check("driving off scores " .. Tuning.points.bossDriven .. " plus " .. Tuning.points.spear .. " a spear",
+		world.bossPoints == Tuning.points.bossDriven + needed * Tuning.points.spear, world.bossPoints)
+	local course = world.course
+	for _ = 1, 120 do
+		world:Step(Tuning.step)
+	end
+	check("zone clock runs again after the boss leaves", world.course > course + 0.5)
+	check("next boss 3 or more zones on", world.bossZone and world.bossZone >= world.boss.zone + 3, world.bossZone)
+
+	-- Spears after the fight do nothing.
+	world:AddEntity("spear", world.runner.lane, world.time + 0.2, 0.9)
+	for _ = 1, 60 do
+		world:Step(Tuning.step)
+	end
+	check("a spear with no boss out scores nothing", world.spearHits == needed)
+end
+
+do
+	-- Lasting until the boss gives up is worth 150.
+	local world = FightWorld(52)
+	world.safeLeft = 1e9
+	local seconds = 0
+	while seconds < Tuning.boss.limit + 1 do
+		world.safeLeft = 1e9
+		world:Step(0.05)
+		seconds = seconds + 0.05
+	end
+	check("the boss gives up after " .. Tuning.boss.limit .. " seconds", world.boss.state == "survived" and world.bossesSurvived == 1, world.boss.state)
+	check("lasting it out scores " .. Tuning.points.bossSurvived, world.bossPoints == Tuning.points.bossSurvived, world.bossPoints)
+end
+
+do
+	-- The boss takes the throws still in its hand with it, and the spears.
+	local world = FightWorld(53)
+	world.cursor = world.time + 0.5
+	world.safeLeft = 1e9
+	for _ = 1, 120 do
+		world.safeLeft = 1e9
+		world:Step(Tuning.step)
+	end
+	local waiting = 0
+	for _, entity in ipairs(world.entities) do
+		if entity.thrown and entity.phase == "waiting" then
+			waiting = waiting + 1
+		end
+	end
+	check("the boss throws hazards", waiting > 0, waiting)
+	world.boss.hits = world.boss.needed - 1
+	world:AddEntity("spear", world.runner.lane, world.time + 0.2, 0.9)
+	for _ = 1, 60 do
+		world.safeLeft = 1e9
+		world:Step(Tuning.step)
+	end
+	local left, spears = 0, 0
+	for _, entity in ipairs(world.entities) do
+		if entity.thrown and entity.phase == "waiting" then
+			left = left + 1
+		elseif entity.role == "spear" then
+			spears = spears + 1
+		end
+	end
+	check("unthrown hazards leave with the boss", world.boss.state == "driven" and left == 0, left)
+	check("spears leave with the boss", spears == 0, spears)
+end
+
+do
+	-- A Stampede running out mid-fight slows you, which moves where throws
+	-- leave and land; a hazard already down stays down, one in the air stays up.
+	local world = FightWorld(54)
+	world.cursor = world.time + 0.5
+	world.powerups.stampede = 30
+	local backwards = false
+	local seen = {}
+	for step = 1, 2400 do
+		world.safeLeft = 1e9
+		if step == 600 then
+			world.powerups.stampede = 0.01
+		end
+		world:Step(Tuning.step)
+		for _, entity in ipairs(world.entities) do
+			if entity.thrown then
+				local order = ({ waiting = 1, flying = 2, landed = 3 })[entity.phase]
+				if seen[entity] and order < seen[entity] then
+					backwards = true
+				end
+				seen[entity] = order
+			end
+		end
+	end
+	check("a throw never goes back to the boss's hand or back into the air", not backwards)
+end
+
+do
+	-- The deciding spear and a crash in the same step: the spear still counts.
+	local world = FightWorld(55)
+	world:Step(Tuning.step * 2)
+	world:DrainEvents()
+	world.boss.hits = world.boss.needed
+	world.bossBeaten = true
+	world.safeLeft, world.shield, world.powerups = 0, false, {}
+	world:AddEntity("block", world.runner.lane, world.time + Tuning.step, 0)
+	world:Step(Tuning.step * 1.5)
+	check("a deciding spear counts even with a crash in the same step",
+		world.over and world.boss.state == "driven" and world.bossPoints >= Tuning.points.bossDriven,
+		tostring(world.over) .. " " .. world.boss.state)
 end
 
 -- Guild messages ----------------------------------------------------------------

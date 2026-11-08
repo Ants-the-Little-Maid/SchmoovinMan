@@ -95,14 +95,35 @@ local function Allowed(pattern, zone, duckEnabled)
 	return pattern.minZone <= zone and (duckEnabled ~= false or not pattern.needsDuck)
 end
 
+-- True when a pattern asks something of the runner (not just tokens).
+local function HasHazard(pattern)
+	if pattern.hasHazard == nil then
+		pattern.hasHazard = false
+		for _, row in ipairs(pattern.rows) do
+			for lane = 1, 3 do
+				if Patterns.REQUIREMENT[row[2]:sub(lane, lane)] then
+					pattern.hasHazard = true
+				end
+			end
+		end
+	end
+	return pattern.hasHazard
+end
+
+Patterns.HasHazard = HasHazard
+
 -- Weighted pick among patterns unlocked by this zone. With ducking off,
--- patterns that need it are left out.
-function Patterns.Pick(rng, zone, duckEnabled)
+-- patterns that need it are left out. `accept`, if given, must also pass
+-- (a boss uses it for hazards that fit before it gives up); with it, nil
+-- comes back when nothing does.
+function Patterns.Pick(rng, zone, duckEnabled, accept)
 	local pattern = ns.Random.Weighted(Patterns.LIST, function(item)
-		return Allowed(item, zone, duckEnabled) and item.weight or 0
+		return Allowed(item, zone, duckEnabled) and (not accept or accept(item)) and item.weight or 0
 	end, rng:Next())
 	if pattern then
 		return pattern, rng:Next() < 0.5
+	elseif accept then
+		return nil
 	end
 	return Patterns.LIST[1], false
 end

@@ -18,8 +18,24 @@ local GEO_WAIT = 1
 
 -- Characters and creatures: measured by the active box only, and their scale
 -- kept within a sane range (they're about life size at scale 1).
-local CHARACTER = { runner = true, jogger = true, alliance = true, charger = true, windRider = true }
+local CHARACTER = { runner = true, jogger = true, alliance = true, charger = true, windRider = true, boss = true }
 local CHARACTER_SCALE_MIN, CHARACTER_SCALE_MAX = 0.5, 2.0
+-- Bosses are bigger than life and come in all shapes (a devilsaur, a
+-- dwarf), so their range is wider. BOSS_WIDTH caps how wide one looms.
+local BOSS_SCALE_MIN, BOSS_SCALE_MAX = 0.2, 4.0
+local BOSS_WIDTH = 6.5
+-- Seconds a spear takes to fly from the runner to the boss, and how long the
+-- boss takes to come out of the fog and to run off at the end.
+local SPEAR_FLIGHT = 0.45
+local BOSS_ARRIVE = 1.4
+local BOSS_LEAVE = 2.2
+-- Fog is measured from the camera, which sits well behind the runner, so a
+-- boss at its spot would stand deep in it (a fire elemental faded out
+-- altogether). In a fight the fog draws back until the boss is at most
+-- BOSS_FOG of the way into it.
+local BOSS_FOG = 0.15
+-- How high a thrown hazard arcs, in yards.
+local THROW_ARC = 4
 -- Posts that hold up high bars: plain fence posts, then a Tauren totem.
 local POSTS = {
 	{ fileID = 199210 }, -- world/generic/orc/passive doodads/orcfence/orcfencepost.m2
@@ -32,7 +48,30 @@ local POSTS = {
 local CALL_DISTANCE = 9
 -- Chase camera: how far ahead it looks, its distance from that point and its tilt.
 -- Aimed so the runner sits a little below centre at the same zoom as 0.2.0.
-local CAMERA = { lookAhead = 4, distance = 16, pitch = math.rad(20), height = 1.6 }
+local CAMERA = { lookAhead = 4, distance = 16, pitch = math.rad(20), height = 1.6, fov = Scene.FIELD_OF_VIEW }
+-- In a boss fight. The chase camera's view spans about 28 degrees top to
+-- bottom (measured from a 0.10.0 screenshot), so its top edge is about 6
+-- degrees below eye level and a boss 58 yards up the road stands out of
+-- sight above it. This camera sits a little lower (5.5 yards up, 10 behind
+-- the runner), tilts less and sees wider: even a 6-yard boss shows under the
+-- boss bar, the runner stays whole and about as big, and the runner hides
+-- 9 yards of its lane rather than 6. FIGHT_CAMERA_TIME: seconds to move over.
+local FIGHT_CAMERA = { lookAhead = 5.6, distance = 16, pitch = math.rad(12.5), height = 2.0, fov = 1.2 }
+local FIGHT_CAMERA_TIME = 1.2
+Renderer.CAMERA, Renderer.FIGHT_CAMERA = CAMERA, FIGHT_CAMERA
+
+local function CameraSetting(key, fight)
+	return CAMERA[key] + (FIGHT_CAMERA[key] - CAMERA[key]) * fight
+end
+
+-- Distance from the fight camera to the boss's spot, ignoring the small
+-- sway with the runner's lane, so the fog it sets stays put through a fight.
+local function FightCameraToBoss()
+	local camera = FIGHT_CAMERA
+	local y = camera.lookAhead - camera.distance * math.cos(camera.pitch)
+	local z = camera.height + camera.distance * math.sin(camera.pitch)
+	return math.sqrt((ns.Tuning.boss.distance - y) ^ 2 + z * z)
+end
 local HALF_PI = math.pi / 2
 
 -- Target sizes per role, in yards: height, lateral width, lift off the ground.
@@ -50,10 +89,29 @@ local function CandidateKey(candidate)
 	return candidate.fileID and ("f" .. candidate.fileID) or ("d" .. tostring(candidate.displayID))
 end
 
+-- Distance from the middle of the road to its edge.
+local function RoadHalf()
+	local lanes = ns.Tuning.lanes
+	return (lanes[#lanes] - lanes[1]) * 0.75
+end
+
 -- Scenery starts a few yards past the road's edge.
 local function SceneryInner()
-	local lanes = ns.Tuning.lanes
-	return (lanes[#lanes] - lanes[1]) * 0.75 + 3
+	return RoadHalf() + 3
+end
+
+-- Scenery stands clear of the road however big or turned it is: once its
+-- size is known, it moves out until no corner of its box (as turned, either
+-- side of where it stands) comes within this many yards of the edge.
+local SCENERY_CLEARANCE = 1.5
+
+local function OffRoad(x, box, yaw, scale)
+	local c, s = math.cos(yaw), math.sin(yaw)
+	local reach = math.max(
+		math.abs(box[1] * c - box[2] * s), math.abs(box[1] * c - box[5] * s),
+		math.abs(box[4] * c - box[2] * s), math.abs(box[4] * c - box[5] * s)) * scale
+	local side = x < 0 and -1 or 1
+	return side * math.max(math.abs(x), RoadHalf() + SCENERY_CLEARANCE + reach)
 end
 
 local function Fade(y, far)
@@ -79,6 +137,8 @@ function Renderer.Create(scene, ground)
 	self.joggerNext = 20
 	self.sceneryNext = 0
 	self.sceneryDistance = 0
+	self.shots = {}
+	self.markers = { count = 0 }
 	return self
 end
 
@@ -188,6 +248,11 @@ function Renderer:Fit(record)
 		scale = Assets.joggerHeight / sizeZ
 	elseif role == "windRider" then
 		scale = Assets.windRiderLength / math.max(sizeX, sizeY)
+	elseif role == "boss" then
+		-- Faces you, like a charger: its side-to-side size is the model's y.
+		scale = math.min((record.height or 3) / sizeZ, BOSS_WIDTH / math.max(sizeY, 0.05))
+		scale = math.max(BOSS_SCALE_MIN, math.min(BOSS_SCALE_MAX, scale))
+		center = true
 	elseif role == "charger" then
 		-- Faces you, so its side-to-side size is the model's y.
 		scale = math.min(target.height / sizeZ, target.width / math.max(sizeY, 0.05))
@@ -214,7 +279,7 @@ function Renderer:Fit(record)
 	end
 	-- A character's reading outside the sane range means a bad measurement,
 	-- not a giant or tiny model: clamp it so it can never vanish or fill the screen.
-	if CHARACTER[role] then
+	if CHARACTER[role] and role ~= "boss" then
 		scale = math.max(CHARACTER_SCALE_MIN, math.min(CHARACTER_SCALE_MAX, scale))
 	end
 	-- Hazards are centred on their lane by their box, not their pivot, so a
@@ -253,6 +318,8 @@ function Renderer:ListFor(entity, zone)
 	local role = entity.role
 	if role == "coin" or role == "gem" then
 		return Assets.tokens[role]
+	elseif role == "spear" then
+		return Assets.spear
 	elseif Assets.powerups[role] then
 		return Assets.powerups[role]
 	elseif role == "charger" then
@@ -316,6 +383,11 @@ function Renderer:SyncEntities(world, zone, now)
 		if record then
 			self:DrawEntity(record, entity, far, now)
 		end
+		-- A throw's landing mark doesn't wait for the hazard's model to load.
+		if entity.thrown and entity.phase == "flying" then
+			local _, progress = ns.Rules.ThrowPhase(ns.Tuning, entity.y, self.speed or 0)
+			self:AddMarker(entity, entity.y, progress, far)
+		end
 	end
 	for id, record in pairs(self.records) do
 		if not seen[id] then
@@ -340,7 +412,7 @@ function Renderer:DrawEntity(record, entity, far, now)
 		z = target.lift
 	end
 	local pitch, roll = 0, 0
-	if role == "coin" or role == "gem" or ns.Rules.POWERUP[role] then
+	if role == "coin" or role == "gem" or role == "spear" or ns.Rules.POWERUP[role] then
 		yaw = now * 2.5 + record.spin
 		z = z - 0.5 + math.sin(now * 4 + record.spin) * 0.1
 	elseif role == "charger" then
@@ -358,6 +430,41 @@ function Renderer:DrawEntity(record, entity, far, now)
 		end
 	end
 	local x, y = entity.x, entity.y
+	local landed = true
+	if entity.thrown then
+		-- Thrown by the boss: hidden in its hand, then arcing from it to where
+		-- it lands, with a marker on that spot. Positions are those it will
+		-- have on the road, so the marker moves with the ground. The phase is
+		-- the world's (it never goes back); progress never goes back either.
+		local phase = entity.phase or "waiting"
+		if phase == "waiting" then
+			actor:SetAlpha(0)
+			if record.posts then
+				self:DrawPosts(record, entity, y, 0)
+			end
+			return
+		elseif phase == "flying" then
+			landed = false
+			local _, progress = ns.Rules.ThrowPhase(ns.Tuning, y, self.speed or 0)
+			progress = math.max(record.throwProgress or 0, progress)
+			record.throwProgress = progress
+			if not record.launched then
+				-- It leaves from where the boss is now, and keeps that start
+				-- while the boss moves on to its next throw or runs off.
+				record.launched = true
+				-- Before the boss is drawn (its model still loading), from its spot.
+				record.fromX = self.bossAimX or x
+				record.fromY = self.bossY or ns.Tuning.boss.distance
+				record.fromZ = self.bossHandZ or 3
+				self.bossThrowAt = now
+			end
+			local fromX, fromY, fromZ = record.fromX, record.fromY, record.fromZ
+			x = fromX + (x - fromX) * progress
+			y = fromY + (y - fromY) * progress
+			z = fromZ + (z - fromZ) * progress + 4 * progress * (1 - progress) * THROW_ARC
+			pitch = (1 - progress) * 5
+		end
+	end
 	if entity.knocked then
 		-- Bowled over: flung up and off the side of the road, tumbling.
 		record.knockedAt = record.knockedAt or now
@@ -387,9 +494,199 @@ function Renderer:DrawEntity(record, entity, far, now)
 	end
 	self.scene:Place(actor, x, y, z + zOffset, yaw, scale, pitch, roll, centerX, centerY)
 	if record.posts then
-		self:DrawPosts(record, entity, y, Fade(y, far))
+		-- A bar's posts appear once it lands.
+		self:DrawPosts(record, entity, y, landed and Fade(y, far) or 0)
 	end
 	actor:SetAlpha(Fade(y, far))
+end
+
+-- A red mark on the road where a thrown hazard will land, as wide as the
+-- hazard's lane and stronger as it falls.
+function Renderer:AddMarker(entity, y, progress, far)
+	local markers = self.markers
+	markers.count = markers.count + 1
+	local marker = markers[markers.count]
+	if not marker then
+		marker = {}
+		markers[markers.count] = marker
+	end
+	local lanes = ns.Tuning.lanes
+	marker.x = entity.x
+	marker.y = y
+	marker.halfWidth = (lanes[2] - lanes[1]) * 0.42
+	marker.halfDepth = 0.9
+	marker.alpha = (0.35 + 0.3 * progress) * Fade(y, far)
+end
+
+-- Boss ------------------------------------------------------------------------------
+
+function Renderer:FreeBoss()
+	if self.bossRecord then
+		self:FreeRecord(self.bossRecord)
+		self.bossRecord = nil
+	end
+	self.bossFight = nil
+	self.bossX, self.bossAimX, self.bossY, self.bossHandZ = nil, nil, nil, nil
+	self.bossHitAt, self.bossThrowAt = nil, nil
+	for _, shot in ipairs(self.shots) do
+		self:FreeRecord(shot.record)
+	end
+	wipe(self.shots)
+end
+
+function Renderer:PlayBoss(key, speed)
+	local record = self.bossRecord
+	if record.anim ~= key then
+		record.anim = key
+		record.actor:SetAnimation(Assets.anims[key][1], nil, speed or 1)
+	end
+end
+
+-- The boss backs away up the road ahead, sliding over to the lane of its
+-- next throw; it flinches when a spear hits and runs off when the fight ends.
+function Renderer:DrawBoss(world, far, now)
+	local fight = world.boss
+	if fight ~= self.bossFight then
+		self:FreeBoss()
+		self.bossFight = fight
+		local zone = fight and ns.ZonesByKey[fight.key]
+		if zone and zone.boss then
+			self.bossRecord = self:NewRecord(zone.boss.models, "boss")
+			if self.bossRecord then
+				self.bossRecord.height = zone.boss.height
+			end
+			self.bossX = 0
+			self.bossHits = 0
+		end
+	end
+	local record = self.bossRecord
+	if not record then
+		return
+	end
+
+	-- A spear that hits flies from the runner to the boss.
+	if fight.hits > (self.bossHits or 0) then
+		self.bossHits = fight.hits
+		local shot = self:NewRecord(Assets.spear, "spear")
+		if shot then
+			tinsert(self.shots, { record = shot, startAt = now, fromX = world.runner.x, fromZ = world.runner.z + 1.6 })
+		end
+		self.bossHitAt = now + SPEAR_FLIGHT
+	end
+
+	self:CheckLoaded(record)
+	if not record.ready then
+		record.actor:SetAlpha(0)
+		return
+	end
+	local tuning = ns.Tuning
+	local elapsed = math.min(1 / 15, now - (self.lastBossDraw or now))
+	self.lastBossDraw = now
+
+	-- Toward the lane of the next hazard still in its hand.
+	local targetX, nearest = 0, nil
+	for _, entity in ipairs(world.entities) do
+		if entity.thrown and entity.phase == "waiting" and (not nearest or entity.y < nearest) then
+			nearest = entity.y
+			targetX = entity.x
+		end
+	end
+	local x = self.bossX + (targetX - self.bossX) * math.min(1, elapsed * 3)
+	self.bossX = x
+	local y = tuning.boss.distance
+	local yaw = -HALF_PI
+	local alpha = 1
+	local since = world.time - fight.start
+	if fight.state ~= "fight" then
+		-- Runs off up the road and to the side, fading out.
+		local left = world.time - fight.endedAt
+		if left > BOSS_LEAVE then
+			-- Gone; still this fight, so it isn't drawn again.
+			self:FreeBoss()
+			self.bossFight = fight
+			return
+		end
+		local side = x <= 0 and -1 or 1
+		yaw = HALF_PI + side * 0.6
+		x = x + side * 6 * left
+		y = y + 9 * left
+		alpha = 1 - left / BOSS_LEAVE
+		self:PlayBoss("bossFlee", 1.5)
+	elseif since < BOSS_ARRIVE then
+		-- Comes out of the fog to its spot.
+		y = y + (1 - since / BOSS_ARRIVE) * 25
+		self:PlayBoss("bossBack", 1.4)
+	elseif self.bossHitAt and now >= self.bossHitAt and now < self.bossHitAt + 0.5 then
+		self:PlayBoss("bossHit")
+	elseif self.bossThrowAt and now - self.bossThrowAt < 0.45 then
+		self:PlayBoss("bossThrow", 1.3)
+	else
+		self:PlayBoss("bossBack", 1.4)
+	end
+	local scale, zOffset, _, centerX, centerY = self:Fit(record)
+	-- Where it is now, running off included: spears and throws use this.
+	self.bossAimX = x
+	self.bossY = y
+	local box = self.bounds[record.key]
+	self.bossHandZ = (box[6] - box[3]) * scale * 0.75
+	self.scene:Place(record.actor, x, y, zOffset, yaw, scale, 0, 0, centerX, centerY)
+	record.actor:SetAlpha(alpha * Fade(y, far))
+end
+
+-- How far the view has moved to the fight camera, from 0 to 1 (eased): it
+-- moves over while a boss is here and back once it's gone.
+function Renderer:UpdateFightView(now)
+	local elapsed = math.min(1 / 15, now - (self.lastViewAt or now))
+	self.lastViewAt = now
+	local target = self.bossRecord and 1 or 0
+	local view = self.fightView or 0
+	if view ~= target then
+		local step = elapsed / FIGHT_CAMERA_TIME
+		view = target > view and math.min(target, view + step) or math.max(target, view - step)
+		self.fightView = view
+	end
+	return view * view * (3 - 2 * view)
+end
+
+-- Draws the fog back as the view moves to the fight camera.
+function Renderer:UpdateFog(zone, fight)
+	local fog = zone.fog
+	local lift = 0
+	if fight > 0 then
+		lift = fight * math.max(0, FightCameraToBoss() - fog.near - BOSS_FOG * (fog.far - fog.near))
+	end
+	if lift ~= (self.fogLift or 0) then
+		self.fogLift = lift
+		self.scene:SetFog(fog, lift)
+	end
+end
+
+-- Spears in flight toward the boss.
+function Renderer:DrawShots(now)
+	local index = 1
+	while index <= #self.shots do
+		local shot = self.shots[index]
+		local record = shot.record
+		local progress = (now - shot.startAt) / SPEAR_FLIGHT
+		if progress >= 1 or not self.bossY then
+			self:FreeRecord(record)
+			tremove(self.shots, index)
+		else
+			self:CheckLoaded(record)
+			if record.ready then
+				local scale, zOffset = self:Fit(record)
+				local toX, toY, toZ = self.bossAimX or 0, self.bossY, self.bossHandZ or 3
+				local x = shot.fromX + (toX - shot.fromX) * progress
+				local y = 0.5 + (toY - 0.5) * progress
+				local z = shot.fromZ + (toZ - shot.fromZ) * progress + 8 * progress * (1 - progress)
+				self.scene:Place(record.actor, x, y, z + zOffset, HALF_PI, scale, -0.4 + progress * 0.8, 0)
+				record.actor:SetAlpha(1)
+			else
+				record.actor:SetAlpha(0)
+			end
+			index = index + 1
+		end
+	end
 end
 
 -- Runner ---------------------------------------------------------------------------
@@ -543,6 +840,10 @@ function Renderer:UpdateScenery(world, zone)
 			self:CheckLoaded(record)
 			if record.ready then
 				local scale, zOffset = self:Fit(record)
+				if not record.offRoad then
+					record.offRoad = true
+					record.x = OffRoad(record.x, self.bounds[record.key], record.yaw, scale)
+				end
 				self.scene:Place(record.actor, record.x, record.y, zOffset, record.yaw, scale)
 				record.actor:SetAlpha(Fade(record.y, far))
 			else
@@ -680,6 +981,11 @@ function Renderer:Reset()
 	self.joggerNext = 20
 	self.joggerDistance = nil
 	self:Dismount()
+	self:FreeBoss()
+	self.fightView = 0
+	self.fogLift = 0
+	self.markers.count = 0
+	self.ground:DrawMarkers(self.markers)
 	self.lastRunnerX = nil
 	self:SetupRunner()
 end
@@ -687,7 +993,7 @@ end
 function Renderer:SetZone(zone)
 	self.zone = zone
 	self.scene:SetLighting(zone.light)
-	self.scene:SetFog(zone.fog)
+	self.scene:SetFog(zone.fog, self.fogLift)
 	self.ground:SetZone(zone)
 end
 
@@ -697,21 +1003,29 @@ function Renderer:Update(world, now)
 	if not self.scene.calibrated then
 		self.scene:Calibrate()
 	end
+	local fight = self:UpdateFightView(now)
 	-- Camera eases toward the runner's lane and rises in flight.
 	local camX = (self.camX or 0) + (state.x * 0.55 - (self.camX or 0)) * 0.12
-	local baseZ = CAMERA.height
+	local baseZ = CameraSetting("height", fight)
 	local camZ = (self.camZ or baseZ) + ((state.flying and state.z + 1.5 or baseZ + state.z * 0.3) - (self.camZ or baseZ)) * 0.08
 	self.camX, self.camZ = camX, camZ
-	self.scene:LookAt(camX, CAMERA.lookAhead, camZ, CAMERA.distance, CAMERA.pitch)
+	self.scene:SetFieldOfView(CameraSetting("fov", fight))
+	self.scene:LookAt(camX, CameraSetting("lookAhead", fight), camZ, CameraSetting("distance", fight), CameraSetting("pitch", fight))
 
 	self:UpdateMount(world)
 	self:DrawRunner(world, now)
+	self.speed = world.speed
+	self.markers.count = 0
+	self:DrawBoss(world, zone.fog.far + 5, now)
+	self:UpdateFog(zone, fight)
+	self:DrawShots(now)
 	self:SyncEntities(world, zone, now)
 	local moved = world.distance - (self.joggerDistance or world.distance)
 	self.joggerDistance = world.distance
 	self:UpdateScenery(world, zone)
 	self:UpdateJoggers(world, zone, moved, now)
 	self.ground:Draw(world.distance)
+	self.ground:DrawMarkers(self.markers)
 end
 
 -- Reports models that never loaded, once per run.

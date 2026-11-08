@@ -88,8 +88,42 @@ ns.Tuning = {
 		duck = 3,
 		-- For each Alliance jogger knocked out of your lane.
 		knock = 5,
+		-- Boss fights: each spear that hits, and the bonus for driving the boss
+		-- off or for lasting until it gives up.
+		spear = 50,
+		bossDriven = 500,
+		bossSurvived = 150,
 	},
 	-- Alliance joggers on the track: the chance one jogs in the gap after a
 	-- chunk, from this zone on, at this share of your speed.
 	alliance = { chance = 0.35, minZone = 1, speedShare = 0.45 },
+
+	-- Bosses. The first comes in a random zone from `first`; after each fight
+	-- the next comes `every` zones later (a random count in that range). A zone
+	-- with no boss passes it on to the next zone that has one. The boss turns up
+	-- `delay` seconds into its zone and the zone clock stops until it leaves.
+	boss = {
+		first = { 3, 6 },
+		every = { 3, 6 },
+		delay = 4,
+		-- Seconds before the boss gives up and leaves.
+		limit = 25,
+		-- Seconds from the boss turning up to its first throw reaching you.
+		leadIn = 3.5,
+		-- Spears to drive it off: `spears` in zone `spearsFrom`, one more every
+		-- `spearsEvery` zones after that.
+		spears = 3,
+		spearsFrom = 3,
+		spearsEvery = 2,
+		-- Spears offered over a fight, as a multiple of those needed.
+		spearSupply = 1.6,
+		-- Where the boss stands, in yards ahead. A thrown hazard leaves its hand
+		-- `throwLead` seconds before it would reach you (no further than
+		-- `throwMax` yards) and lands `landLead` seconds before; near top speed
+		-- the throwMax cap brings that down to about a second.
+		distance = 58,
+		throwLead = 2.4,
+		throwMax = 54,
+		landLead = 1.1,
+	},
 }

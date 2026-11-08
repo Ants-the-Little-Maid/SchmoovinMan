@@ -162,6 +162,24 @@ ns.Assets = {
 			"Schmoove or be schmooved!",
 			"Sorry! Not sorry!",
 		},
+		-- Said when a boss turns up, and when it's driven off or gives up.
+		bossStart = {
+			"You picked the wrong road!",
+			"Out of my way, I've got schmoovin' to do!",
+			"Bring it on!",
+			"Not today!",
+		},
+		bossDriven = {
+			"And stay out!",
+			"Schmooved!",
+			"That's what I thought!",
+			"Don't come back!",
+		},
+		bossSurvived = {
+			"Can't catch what you can't schmoove!",
+			"Too schmoove for you!",
+			"Giving up already?",
+		},
 		-- Seconds between the runner's compliment and the Tauren's reply.
 		replyDelay = 0.9,
 		-- Chance of a side line rather than a general one.
@@ -188,6 +206,13 @@ ns.Assets = {
 			{ fileID = 202443, size = 1.0 }, -- kalimdor/silithus/passivedoodads/crystals/floatingpurplecrystal01.m2
 			{ fileID = 202748, size = 1.0 }, -- kalimdor/ungoro/passivedoodads/crystals/ungorocrystal_blue01.m2
 		},
+	},
+
+	-- Boss fights only: grab one and it's thrown at the boss.
+	spear = {
+		{ fileID = 200611, size = 1.8 }, -- generic/tauren/passive doodads/weapons/tauren_weaponspear.m2
+		{ fileID = 199436, size = 1.8 }, -- generic/orc/passive doodads/weapons/orcspear01.m2
+		{ fileID = 200237, size = 1.8 }, -- generic/passivedoodads/weapons/steelspear01.m2
 	},
 
 	-- Power-up pickups: each a different, easy-to-spot object.
@@ -231,6 +256,12 @@ ns.Assets = {
 		cheer = { 68 },
 		creatureRun = { 5 },
 		windRiderFly = { 135, 556, 5 }, -- Fly, MountFlightRun, Run
+		-- Bosses back away from you up the road, throw, flinch when a spear hits
+		-- and run off at the end.
+		bossBack = { 13 }, -- Walkbackwards (falls back to Walk)
+		bossThrow = { 107 }, -- an attack (falls back to AttackUnarmed)
+		bossHit = { 9 }, -- CombatWound
+		bossFlee = { 5 }, -- Run
 	},
 
 	-- SOUNDKIT names; missing ones are skipped.
@@ -245,5 +276,9 @@ ns.Assets = {
 		newBest = "LFG_REWARDS",
 		start = "UI_PET_BATTLE_START",
 		click = "U_CHAT_SCROLL_BUTTON",
+		bossStart = "RAID_WARNING",
+		spear = "UI_QUEST_ROLLING_FORWARD_01",
+		bossDriven = "UI_EPICLOOT_TOAST",
+		bossSurvived = "UI_WORLDQUEST_COMPLETE",
 	},
 }
