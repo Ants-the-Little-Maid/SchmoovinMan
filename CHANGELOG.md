@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.10.0 (unreleased)
+## 0.10.0 (2026-11-08)
 
 - Bosses: every few zones a boss blocks the road and throws hazards into your lanes, with a red mark where each will land. Grab the spears that turn up to throw them at it: enough hits drive it off for +500 (and +50 a spear), or survive 25 seconds until it gives up for +150. The first comes in zone 3 to 6 and the next 3 to 6 zones after each fight. Spears needed start at 3 and rise by one every 2 zones. The zone clock stops while a boss is out.
 - Twelve bosses, one for each zone outside the Horde capitals: Verog the Dervish, Arnak Grimtotem, Ursangous, Volchan, Krellack, King Mosh, Rak'shiri, Edwin VanCleef, Omen, Highlord Bolvar Fordragon, Tyrande Whisperwind and King Magni Bronzebeard.
