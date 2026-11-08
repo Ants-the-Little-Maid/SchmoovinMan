@@ -34,7 +34,8 @@ jobs:
     permissions:
       contents: write
     env:
-      # CurseForge upload token; without it the zip still goes to the GitHub release.
+      # CurseForge upload token, for the project ID in the TOC. If it is
+      # missing or expired the CurseForge upload fails: check the job log.
       CF_API_KEY: ${{ secrets.CF_API_KEY }}
       GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
     steps:
