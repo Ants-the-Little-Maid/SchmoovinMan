@@ -305,7 +305,7 @@ do
 	local function FromTop(y, z)
 		local cy = scene.targetY - scene.distance * math.cos(scene.pitch)
 		local cz = scene.targetZ + scene.distance * math.sin(scene.pitch)
-		local angle = math.atan(z - cz, y - cy) + scene.pitch
+		local angle = math.atan2(z - cz, y - cy) + scene.pitch
 		return 0.5 - 0.5 * math.tan(angle) / (math.tan(scene.fov / 2) / 2.086)
 	end
 	local tallest = 0
