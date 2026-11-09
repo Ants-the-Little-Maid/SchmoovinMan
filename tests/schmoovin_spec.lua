@@ -6,7 +6,7 @@ local seedCount = tonumber(arg and arg[2]) or 20
 local minutes = tonumber(arg and arg[3]) or 10
 
 local ns = {}
-for _, file in ipairs({ "Data/Tuning.lua", "Data/Assets.lua", "Data/Zones.lua", "Game/Random.lua", "Game/Rules.lua", "Game/Patterns.lua", "Game/Runner.lua", "Game/World.lua", "Social/Codec.lua" }) do
+for _, file in ipairs({ "Data/Tuning.lua", "Data/Assets.lua", "Data/Zones.lua", "Data/OrcRun.lua", "Game/Random.lua", "Game/Rules.lua", "Game/Patterns.lua", "Game/Runner.lua", "Game/World.lua", "Social/Codec.lua" }) do
 	local chunk = assert(loadfile(root .. "/" .. file))
 	chunk("SchmoovinMan", ns)
 end
@@ -43,6 +43,9 @@ check("gold rush doubles", Rules.TokenValue(Tuning, "coin", true) == 20)
 check("time rate zone 1", Rules.TimeRate(Tuning, 1) == 10)
 check("time rate zone 4", Rules.TimeRate(Tuning, 4) == 16)
 check("score floors", Rules.Score(120, 33.9) == 153)
+check("slow start scores x0.75", Rules.Score(100, 0, 0, 0, 0.75) == 75)
+check("fast start scores x1.25", Rules.Score(100, 1, 0, 0, 1.25) == 126)
+check("three starting speeds, Normal at 11", #Tuning.startSpeeds == 3 and Tuning.startSpeeds[2].speed == 11 and Tuning.startSpeeds[2].multiplier == 1)
 
 -- Speed curve -------------------------------------------------------------------
 
@@ -199,8 +202,8 @@ end
 
 -- Spawn timelines are fair ------------------------------------------------------
 
-local function RunTimeline(seed, tuning, seconds)
-	local world = World.New(seed, tuning, { recordTimeline = true })
+local function RunTimeline(seed, tuning, seconds, mode)
+	local world = World.New(seed, tuning, { recordTimeline = true, mode = mode })
 	while world.time < seconds do
 		world.safeLeft = 1e9
 		world:Step(0.1)
@@ -224,7 +227,7 @@ end
 
 -- A planning bot survives -------------------------------------------------------
 
-local ROLE_CODE = { low = "L", high = "H", block = "B", wall = "B", charger = "B" }
+local ROLE_CODE = { low = "L", high = "H", block = "B", wall = "B", charger = "B", tauren = "B" }
 
 -- Lane of the planned path at the first row still ahead.
 local function NextLane(states, startState, now)
@@ -249,8 +252,8 @@ local function SortByTime(items)
 	end)
 end
 
-local function PlayBot(seed, tuning, seconds)
-	local world = World.New(seed, tuning)
+local function PlayBot(seed, tuning, seconds, mode)
+	local world = World.New(seed, tuning, { mode = mode })
 	local runner = world.runner
 	local lastJump, lastDuck = -1000, -1000
 	local target = runner.lane
@@ -261,7 +264,17 @@ local function PlayBot(seed, tuning, seconds)
 			planTimer = 0.02
 			local items = {}
 			local spear
+			-- An orc run's Tauren overlaps you for a moment either side of drawing
+			-- level: its lane is blocked for all of that.
+			local window = world.mode == "orc" and world:TaurenWindow() + 0.05
 			for _, entity in ipairs(world.entities) do
+				if entity.role == "tauren" then
+					for _, t in ipairs({ entity.arrive - window, entity.arrive + window }) do
+						if t > world.time - 0.1 then
+							items[#items + 1] = { t = t, lane = entity.lane, code = "B" }
+						end
+					end
+				end
 				local code = ROLE_CODE[entity.role]
 				-- A jump or duck already under way counts as done in this lane, and
 				-- as a block in the others (too late to jump there).
@@ -860,6 +873,160 @@ do
 	check("a deciding spear counts even with a crash in the same step",
 		world.over and world.boss.state == "driven" and world.bossPoints >= Tuning.points.bossDriven,
 		tostring(world.over) .. " " .. world.boss.state)
+end
+
+-- Orc runs ----------------------------------------------------------------------
+
+local OrcRun = ns.OrcRun
+check("name fingerprint is fixed", OrcRun.NameKey("Test") == "7c9e6865", OrcRun.NameKey("Test"))
+check("name fingerprint ignores case", OrcRun.NameKey("TEST") == OrcRun.NameKey("test"))
+check("name fingerprints differ", OrcRun.NameKey("Testa") ~= OrcRun.NameKey("Testb"))
+check("name fingerprint skips the surname separator", OrcRun.NameKey("Grunk Smasher") == OrcRun.NameKey("Grunk-Smasher")
+	and OrcRun.NameKey("Grunk Smasher") == OrcRun.NameKey("grunksmasher"))
+check("one target listed", (function()
+	local targets = 0
+	for _ in pairs(OrcRun.targets) do targets = targets + 1 end
+	return targets == 1
+end)())
+do
+	local targets = OrcRun.targets
+	OrcRun.targets = { [OrcRun.NameKey("Grunk Smasher")] = true, [OrcRun.NameKey("Testy")] = true }
+	check("target by full name", OrcRun.RoleFor("Grunk Smasher", "Grunk") == "target")
+	check("target by first name", OrcRun.RoleFor("Testy Mctest", "Testy") == "target")
+	check("anyone else has no role", OrcRun.RoleFor("Someone", "Someone") == nil)
+	check("no name has no role", OrcRun.RoleFor(nil, nil) == nil)
+	OrcRun.targets = targets
+end
+-- Odds: about 1 in 25 for the target, every run when forced, never for
+-- anyone else.
+do
+	local rng = ns.Random.New(99)
+	local rolls = 20000
+	local counts = { target = 0, none = 0, forced = 0 }
+	for _ = 1, rolls do
+		for key, role in pairs({ target = "target", none = false }) do
+			if OrcRun.Roll(role or nil, false, rng:Next()) then
+				counts[key] = counts[key] + 1
+			end
+		end
+		if OrcRun.Roll(nil, true, rng:Next()) then
+			counts.forced = counts.forced + 1
+		end
+	end
+	check("target gets about 1 run in 25", near(counts.target / rolls, 1 / 25, 0.006), counts.target / rolls)
+	check("nobody else gets one", counts.none == 0, counts.none)
+	check("forced is every run", counts.forced == rolls, counts.forced)
+end
+
+-- An untouchable orc run: what's on the road, speeds, Tauren movement, dodges.
+do
+	local world = World.New(11, Tuning, { mode = "orc" })
+	local roles, seen = {}, {}
+	local startBehind, rising, orcSteady, taurenRising = true, true, true, true
+	local lastTauren = world.taurenSpeed
+	while world.time < 150 do
+		world.safeLeft = 1e9
+		world:Step(0.05)
+		world:DrainEvents()
+		if not near(world.speed, Rules.Speed(Tuning, 0)) then
+			orcSteady = false
+		end
+		if world.taurenSpeed < lastTauren - 1e-9 then
+			taurenRising = false
+		end
+		lastTauren = world.taurenSpeed
+		for _, entity in ipairs(world.entities) do
+			roles[entity.role] = true
+			if entity.role == "tauren" then
+				if not seen[entity.id] then
+					startBehind = startBehind and entity.y < 0 and entity.y >= -Tuning.orcRun.spawnBehind - 1e-6
+				elseif entity.y < seen[entity.id] - 1e-9 then
+					rising = false
+				end
+				seen[entity.id] = entity.y
+			end
+		end
+	end
+	local others = {}
+	for role in pairs(roles) do
+		if role ~= "tauren" and role ~= "coin" and role ~= "gem" then
+			others[#others + 1] = role
+		end
+	end
+	check("orc run: only Tauren and tokens on the road", #others == 0 and roles.tauren and roles.coin, table.concat(others, ", "))
+	check("orc run: no bosses", world.boss == nil and world.bossZone == nil)
+	check("orc run: Tauren start behind you", startBehind)
+	check("orc run: Tauren only move up the road", rising)
+	check("orc run: you keep the zone-1 speed", orcSteady)
+	check("orc run: Tauren speed up", taurenRising and world.taurenSpeed > Rules.TaurenSpeed(Tuning, 0) + 10, world.taurenSpeed)
+	check("orc run: zones advance", world.zoneIndex >= 6, world.zoneIndex)
+	check("orc run: each Tauren past is a dodge", world.dodges > 50 and world.movePoints == world.dodges * Tuning.points.dodge, world.dodges)
+end
+
+-- One Tauren in another lane goes by for points; one in your lane tramples you.
+do
+	local world = World.New(12, Tuning, { mode = "orc" })
+	world:Step(0.05)
+	world.cursor, world.coinNext = 1e9, 1e9
+	world.entities = {}
+	world:DrainEvents()
+	local other = world.runner.lane == 1 and 3 or 1
+	world:AddEntity("tauren", other, world.time + 1, 0)
+	for _ = 1, 240 do
+		world:Step(Tuning.step)
+	end
+	local dodged = 0
+	for _, event in ipairs(world:DrainEvents()) do
+		if event.type == "dodge" then
+			dodged = dodged + 1
+		end
+	end
+	check("orc run: a Tauren in another lane is dodged once", not world.over and dodged == 1 and world.dodges == 1, dodged)
+	world:AddEntity("tauren", world.runner.lane, world.time + 1, 0)
+	for _ = 1, 240 do
+		world:Step(Tuning.step)
+	end
+	check("orc run: a Tauren in your lane tramples you", world.over and world.crashRole == "tauren" and world.dodges == 1)
+end
+
+-- Slow and fast starts: the run starts at that speed, scores with its
+-- multiplier, stays fair, and the planning bot gets through, orc runs too.
+for _, choice in ipairs(Tuning.startSpeeds) do
+	if choice.multiplier ~= 1 then
+		local tuning = copy(Tuning)
+		tuning.baseSpeed, tuning.scoreMultiplier = choice.speed, choice.multiplier
+		local world = World.New(5, tuning)
+		world:Step(0.05)
+		check(("%s start begins at %d yd/s"):format(choice.name, choice.speed), near(world.speed, choice.speed + tuning.rampPerSecond * world.time, 0.01), world.speed)
+		local timeline = RunTimeline(5, tuning, minutes * 60)
+		table.sort(timeline, function(a, b)
+			return a.t < b.t
+		end)
+		check(("%s start timeline"):format(choice.name), (Patterns.Feasible(timeline, tuning)))
+		for _, mode in ipairs({ false, "orc" }) do
+			local played = PlayBot(5, copy(tuning), minutes * 60, mode or nil)
+			local label = ("bot survives a %s start%s"):format(choice.name, mode and " orc run" or "")
+			check(label, not played.over, ("crashed into %s at %.1fs"):format(tostring(played.crashRole), played.time))
+			local raw = played.tokenPoints + played.timePoints + played.movePoints + played.bossPoints
+			check(label .. ": score multiplied", played.score == math.floor(raw * choice.multiplier), played.score)
+		end
+	end
+end
+
+-- Every orc run leaves a way through, and a planning bot gets through it.
+for seed = 1, math.min(seedCount, 10) do
+	local timeline = RunTimeline(seed, copy(Tuning), minutes * 60, "orc")
+	table.sort(timeline, function(a, b)
+		return a.t < b.t
+	end)
+	local ok, at = Patterns.Feasible(timeline, Tuning)
+	check(("orc timeline seed %d"):format(seed), ok, at)
+	local world = PlayBot(seed, copy(Tuning), minutes * 60, "orc")
+	check(("bot survives orc run seed %d"):format(seed), not world.over,
+		("trampled at %.1fs in zone %d"):format(world.time, world.zoneIndex))
+	if seed == 1 then
+		check("orc bot collects tokens and dodges", world.tokens > 20 and world.dodges > 100, ("%d tokens, %d dodges"):format(world.tokens, world.dodges))
+	end
 end
 
 -- Guild messages ----------------------------------------------------------------

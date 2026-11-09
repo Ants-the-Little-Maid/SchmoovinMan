@@ -50,7 +50,8 @@ Patterns.LIST = {
 }
 
 -- Requirement for each code; codes not listed ask nothing of the runner.
-Patterns.REQUIREMENT = { L = "jump", A = "jump", H = "duck", B = "avoid", W = "avoid", C = "avoid" }
+-- T is a Tauren coming up from behind in an orc run (never in a pattern).
+Patterns.REQUIREMENT = { L = "jump", A = "jump", H = "duck", B = "avoid", W = "avoid", C = "avoid", T = "avoid" }
 
 -- Fairness limits used by Feasible: seconds per lane moved, and the shortest
 -- time between two actions in a row.

@@ -15,10 +15,25 @@ local Scene = ns.Scene
 local LOAD_TIMEOUT = 10
 -- Longest wait for the geometry-ready signal before measuring anyway.
 local GEO_WAIT = 1
+-- Longest wait for an outfit's item to load, from the first try-on, before
+-- the next one is tried; and how often a waiting item is tried again.
+local DRESS_WAIT = 3
+local DRESS_RETRY = 0.25
+local TRY_ON = Enum and Enum.ItemTryOnReason or {}
+local TRY_ON_SUCCESS, TRY_ON_PENDING = TRY_ON.Success or 0, TRY_ON.DataPending or 3
+
+-- True when the player's own character is an orc.
+local function PlayerIsOrc()
+	if not UnitRace then
+		return false
+	end
+	local _, raceFile = UnitRace("player")
+	return raceFile == "Orc"
+end
 
 -- Characters and creatures: measured by the active box only, and their scale
 -- kept within a sane range (they're about life size at scale 1).
-local CHARACTER = { runner = true, jogger = true, alliance = true, charger = true, windRider = true, boss = true }
+local CHARACTER = { runner = true, jogger = true, alliance = true, charger = true, windRider = true, boss = true, tauren = true }
 local CHARACTER_SCALE_MIN, CHARACTER_SCALE_MAX = 0.5, 2.0
 -- Bosses are bigger than life and come in all shapes (a devilsaur, a
 -- dwarf), so their range is wider. BOSS_WIDTH caps how wide one looms.
@@ -58,10 +73,42 @@ local CAMERA = { lookAhead = 4, distance = 16, pitch = math.rad(20), height = 1.
 -- 9 yards of its lane rather than 6. FIGHT_CAMERA_TIME: seconds to move over.
 local FIGHT_CAMERA = { lookAhead = 5.6, distance = 16, pitch = math.rad(12.5), height = 2.0, fov = 1.2 }
 local FIGHT_CAMERA_TIME = 1.2
-Renderer.CAMERA, Renderer.FIGHT_CAMERA = CAMERA, FIGHT_CAMERA
+-- Orc runs: pulled back about 28 yards from the orc (the chase camera is 12.5)
+-- and looking at a spot behind it, so the orc runs a fifth of the way down
+-- the view with about 19 yards of road behind it in sight, where the Tauren
+-- come from. Wide, so the road ahead still reaches the horizon above it.
+local ORC_CAMERA = { lookAhead = -14, distance = 14, pitch = math.rad(20), height = 1.6, fov = 1.3 }
+-- Orc runs: a Tauren yells as it comes this close behind the orc, so its
+-- line can be read before it runs off up the road.
+local TAUREN_CALL = 3
+Renderer.CAMERA, Renderer.FIGHT_CAMERA, Renderer.ORC_CAMERA = CAMERA, FIGHT_CAMERA, ORC_CAMERA
 
-local function CameraSetting(key, fight)
-	return CAMERA[key] + (FIGHT_CAMERA[key] - CAMERA[key]) * fight
+-- What the view looks like in each kind of run (Reset picks one):
+--   camera     the base camera (a boss fight moves from it to FIGHT_CAMERA)
+--   runner     the runner's model list in Assets
+--   ownOrc     the list used instead when the player's character is an orc
+--   behind     how far behind the runner, in yards, the road and scenery reach
+--   clearAhead keeps the fog clear this many yards past the runner, for a
+--              camera far enough back that the fog would cover it (nil: none)
+--   joggers    whether joggers run beside the road
+-- An orc run pulls the camera back, so the road behind (where the Tauren
+-- come from) shows down to just past the bottom of the view.
+local VIEWS = {
+	normal = { camera = CAMERA, runner = "runner", behind = -6, joggers = true },
+	orc = { camera = ORC_CAMERA, runner = "orcRunner", ownOrc = "orcPlayerRunner", behind = -24, clearAhead = 10, joggers = false },
+}
+
+-- A camera setting part way (fight, 0 to 1) from the base camera to the fight camera.
+local function CameraSetting(key, fight, base)
+	base = base or CAMERA
+	return base[key] + (FIGHT_CAMERA[key] - base[key]) * fight
+end
+
+-- Distance from a camera to the road `ahead` yards past the runner.
+local function CameraToRoad(camera, ahead)
+	local y = camera.lookAhead - camera.distance * math.cos(camera.pitch)
+	local z = camera.height + camera.distance * math.sin(camera.pitch)
+	return math.sqrt((ahead - y) ^ 2 + z * z)
 end
 
 -- Distance from the fight camera to the boss's spot, ignoring the small
@@ -85,9 +132,7 @@ local TARGET = {
 	charger = { height = 2.3, width = 2.0 },
 }
 
-local function CandidateKey(candidate)
-	return candidate.fileID and ("f" .. candidate.fileID) or ("d" .. tostring(candidate.displayID))
-end
+local CandidateKey = ns.Models.Key
 
 -- Distance from the middle of the road to its edge.
 local function RoadHalf()
@@ -139,6 +184,7 @@ function Renderer.Create(scene, ground)
 	self.sceneryDistance = 0
 	self.shots = {}
 	self.markers = { count = 0 }
+	self.view = VIEWS.normal
 	return self
 end
 
@@ -159,10 +205,14 @@ function Renderer:LoadCandidate(record)
 	record.key = CandidateKey(candidate)
 	record.startedAt = GetTime()
 	record.ready = self.bounds[record.key] ~= nil
+	record.dressed, record.dressIndex, record.dressRetryAt = nil, nil, nil
 	local actor = record.actor
 	actor:ClearModel()
 	local ok
-	if candidate.displayID then
+	if candidate.unit then
+		-- That unit's own look (sheathed, its gear on until Dress).
+		ok = actor:SetModelByUnit(candidate.unit, true, true, true)
+	elseif candidate.displayID then
 		ok = actor:SetModelByCreatureDisplayID(candidate.displayID)
 	else
 		ok = actor:SetModelByFileID(candidate.fileID)
@@ -173,6 +223,14 @@ function Renderer:LoadCandidate(record)
 end
 
 function Renderer:MarkBad(record)
+	-- A copied character can fail for a passing reason (still streaming in
+	-- after a loading screen), so it's tried again next time rather than
+	-- remembered, and isn't reported as a missing model.
+	if record.candidate and record.candidate.unit then
+		record.index = record.index + 1
+		self:LoadCandidate(record)
+		return
+	end
 	-- Several copies of one model can fail together; report each model once.
 	if not self.badModels[record.key] then
 		self.badModels[record.key] = true
@@ -182,9 +240,68 @@ function Renderer:MarkBad(record)
 	self:LoadCandidate(record)
 end
 
+-- Puts a copied character in its outfit: everything off, then each slot's
+-- first item that goes on (only Success counts, as in the game's own
+-- dressing room). An item whose data hasn't loaded is asked for once and
+-- tried again every DRESS_RETRY, for up to DRESS_WAIT from the first
+-- try-on; then the next is tried. Sets record.dressed once every slot is
+-- settled, worn or left bare.
+function Renderer:Dress(record)
+	local actor = record.actor
+	local now = GetTime()
+	if not actor:IsLoaded() or now < (record.dressRetryAt or 0) then
+		return
+	end
+	if not record.dressIndex then
+		actor:Undress(true)
+		record.dressIndex, record.dressRequested, record.dressStartedAt = {}, {}, now
+	end
+	local waiting = false
+	for slot, items in ipairs(record.candidate.dress) do
+		local index = record.dressIndex[slot] or 1
+		while index <= #items do
+			local id = items[index]
+			local reason = actor:TryOn("item:" .. id)
+			if reason == TRY_ON_SUCCESS then
+				index = math.huge
+			elseif reason == TRY_ON_PENDING and now - record.dressStartedAt < DRESS_WAIT then
+				if not record.dressRequested[id] and C_Item and C_Item.RequestLoadItemDataByID then
+					record.dressRequested[id] = true
+					C_Item.RequestLoadItemDataByID(id)
+				end
+				waiting = true
+				break
+			else
+				-- Not for this race, not wearable, missing, or still not loaded:
+				-- the next one.
+				index = index + 1
+			end
+		end
+		record.dressIndex[slot] = index
+	end
+	record.dressed = not waiting
+	record.dressRetryAt = waiting and now + DRESS_RETRY or nil
+end
+
 -- Reads the bounding box once the model has loaded; gives up after a while.
+-- A copied character is dressed first, so it's measured as it will look.
 function Renderer:CheckLoaded(record)
-	if record.ready or record.failed then
+	if record.failed then
+		return
+	end
+	if record.candidate and record.candidate.dress and not record.dressed then
+		record.ready = false
+		self:Dress(record)
+		if not record.dressed then
+			-- Only a model that never loads gives up: waiting on its items
+			-- has its own limit (DRESS_WAIT).
+			if not record.actor:IsLoaded() and GetTime() - record.startedAt > LOAD_TIMEOUT then
+				self:MarkBad(record)
+			end
+			return
+		end
+	end
+	if record.ready then
 		return
 	end
 	local actor = record.actor
@@ -240,7 +357,8 @@ function Renderer:Fit(record)
 	local target = TARGET[role]
 	local candidate = record.candidate
 	local scale, yaw, center
-	if role == "runner" then
+	if role == "runner" or role == "tauren" then
+		-- A Tauren in an orc run is as big as the Schmoovin Man himself.
 		scale = Assets.runnerHeight / sizeZ
 	elseif role == "post" then
 		scale = (TARGET.high.lift + TARGET.high.height) / sizeZ
@@ -316,26 +434,20 @@ end
 
 function Renderer:ListFor(entity, zone)
 	local role = entity.role
-	if role == "coin" or role == "gem" then
-		return Assets.tokens[role]
+	-- Hazards, chargers, coins and gems: the zone's models, or the one picked
+	-- for it in Options, then backups (Render/Models.lua).
+	if ns.Models.PICKABLE[role] then
+		return ns.Models.List(zone, role)
 	elseif role == "spear" then
 		return Assets.spear
 	elseif Assets.powerups[role] then
 		return Assets.powerups[role]
-	elseif role == "charger" then
-		return zone.charger
 	elseif role == "alliance" then
 		return Assets.alliance[math.random(#Assets.alliance)]
+	elseif role == "tauren" then
+		return Assets.stampede[math.random(#Assets.stampede)]
 	end
-	-- Zone models first, then the shared fallbacks.
-	local list = {}
-	for _, candidate in ipairs(zone.obstacles[role] or {}) do
-		tinsert(list, candidate)
-	end
-	for _, candidate in ipairs(ns.GenericObstacles[role] or {}) do
-		tinsert(list, candidate)
-	end
-	return list
+	return {}
 end
 
 -- Hazards of the same kind side by side in one row are one barrier, so it's
@@ -383,6 +495,14 @@ function Renderer:SyncEntities(world, zone, now)
 		if record then
 			self:DrawEntity(record, entity, far, now)
 		end
+		-- An orc run's Tauren yells as it comes level with you (see TakePasses),
+		-- passing on your left (-1) or right (1), or in your own lane (no side).
+		if entity.role == "tauren" and not entity.called and entity.y >= -TAUREN_CALL then
+			entity.called = true
+			local lane = world.runner.lane
+			local side = entity.lane < lane and -1 or entity.lane > lane and 1 or nil
+			tinsert(self.passes, { tauren = entity, side = side })
+		end
 		-- A throw's landing mark doesn't wait for the hazard's model to load.
 		if entity.thrown and entity.phase == "flying" then
 			local _, progress = ns.Rules.ThrowPhase(ns.Tuning, entity.y, self.speed or 0)
@@ -421,6 +541,16 @@ function Renderer:DrawEntity(record, entity, far, now)
 			actor:SetAnimation(Assets.anims.creatureRun[1], nil, 1.4)
 			record.animated = true
 		end
+	elseif role == "tauren" then
+		-- Running past you up the road, their stride quickening with their speed.
+		yaw = HALF_PI
+		local pace = math.max(0.8, math.min(2.6, (self.taurenSpeed or 11) / 11))
+		if not record.pace or math.abs(record.pace - pace) > 0.1 then
+			record.pace = pace
+			actor:SetAnimation(Assets.anims.run[1], nil, pace)
+		end
+		-- They fade as they get far ahead, before they're dropped.
+		far = math.min(far, ns.Tuning.orcRun.despawnAhead)
 	elseif role == "alliance" then
 		-- Jogging away from you, like the roadside joggers.
 		yaw = HALF_PI
@@ -497,7 +627,13 @@ function Renderer:DrawEntity(record, entity, far, now)
 		-- A bar's posts appear once it lands.
 		self:DrawPosts(record, entity, y, landed and Fade(y, far) or 0)
 	end
-	actor:SetAlpha(Fade(y, far))
+	local alpha = Fade(y, far)
+	if role == "tauren" then
+		-- An orc run's Tauren fades in over its first few yards, coming in at
+		-- the bottom edge.
+		alpha = math.max(0, math.min(alpha, (y + ns.Tuning.orcRun.spawnBehind) / 3))
+	end
+	actor:SetAlpha(alpha)
 end
 
 -- A red mark on the road where a thrown hazard will land, as wide as the
@@ -563,6 +699,14 @@ function Renderer:DrawBoss(world, far, now)
 	if not record then
 		return
 	end
+	-- Gone once it has run off, drawn or not: a boss whose model never
+	-- loaded must go too, or the fight camera would stay. Still this fight,
+	-- so it isn't drawn again.
+	if fight.state ~= "fight" and world.time - fight.endedAt > BOSS_LEAVE then
+		self:FreeBoss()
+		self.bossFight = fight
+		return
+	end
 
 	-- A spear that hits flies from the runner to the boss.
 	if fight.hits > (self.bossHits or 0) then
@@ -600,12 +744,6 @@ function Renderer:DrawBoss(world, far, now)
 	if fight.state ~= "fight" then
 		-- Runs off up the road and to the side, fading out.
 		local left = world.time - fight.endedAt
-		if left > BOSS_LEAVE then
-			-- Gone; still this fight, so it isn't drawn again.
-			self:FreeBoss()
-			self.bossFight = fight
-			return
-		end
 		local side = x <= 0 and -1 or 1
 		yaw = HALF_PI + side * 0.6
 		x = x + side * 6 * left
@@ -648,11 +786,16 @@ function Renderer:UpdateFightView(now)
 	return view * view * (3 - 2 * view)
 end
 
--- Draws the fog back as the view moves to the fight camera.
+-- Draws the fog back as the view moves to the fight camera, and in an orc
+-- run, where the camera is further back, enough to keep the road clear just
+-- past the orc.
 function Renderer:UpdateFog(zone, fight)
 	local fog = zone.fog
 	local lift = 0
-	if fight > 0 then
+	local view = self.view
+	if view.clearAhead then
+		lift = math.max(0, CameraToRoad(view.camera, view.clearAhead) - fog.near)
+	elseif fight > 0 then
 		lift = fight * math.max(0, FightCameraToBoss() - fog.near - BOSS_FOG * (fog.far - fog.near))
 	end
 	if lift ~= (self.fogLift or 0) then
@@ -691,9 +834,19 @@ end
 
 -- Runner ---------------------------------------------------------------------------
 
+-- The runner is the Schmoovin Man, or in an orc run an orc.
 function Renderer:SetupRunner()
+	local list = Assets[self.view.runner]
+	-- An orc player's orc run shows their own character.
+	if self.view.ownOrc and PlayerIsOrc() then
+		list = Assets[self.view.ownOrc]
+	end
+	if self.runner and self.runner.list ~= list then
+		self:FreeRecord(self.runner)
+		self.runner = nil
+	end
 	if not self.runner then
-		self.runner = self:NewRecord(Assets.runner, "runner")
+		self.runner = self:NewRecord(list, "runner")
 	end
 	self.runnerAnim = nil
 end
@@ -832,9 +985,10 @@ function Renderer:UpdateScenery(world, zone)
 	end
 
 	local keep = {}
+	local gone = self.view.behind - 4
 	for _, record in ipairs(self.scenery) do
 		record.y = record.y - moved
-		if record.y < -10 or record.failed then
+		if record.y < gone or record.failed then
 			self:FreeRecord(record)
 		else
 			self:CheckLoaded(record)
@@ -936,6 +1090,15 @@ function Renderer:JoggerHeadPoint(record)
 	return self.scene:Project(record.x, record.y, Assets.joggerHeight + 0.4)
 end
 
+-- Screen position above an orc run's Tauren's head, or nil once it's gone.
+function Renderer:EntityHeadPoint(entity)
+	local record = self.records[entity.id]
+	if not (record and record.ready) then
+		return nil
+	end
+	return self.scene:Project(entity.x, entity.y, Assets.runnerHeight + 0.4)
+end
+
 -- Screen position above the runner's head, for the speech bubble.
 function Renderer:RunnerHeadPoint(world)
 	local state = world.runner
@@ -945,7 +1108,7 @@ end
 -- Scatters scenery along the whole visible track, for a full view at the start.
 function Renderer:FillScenery(world, zone)
 	local far = zone.fog.far + 5
-	local y = -6
+	local y = self.view.behind
 	while y < far do
 		local side = math.random() < 0.5 and -1 or 1
 		local candidate = zone.scenery[math.random(#zone.scenery)]
@@ -964,7 +1127,11 @@ end
 
 -- Frame ------------------------------------------------------------------------------
 
-function Renderer:Reset()
+-- Clears the view for a new run (or the start screen). mode: nil, or "orc"
+-- for an orc run.
+function Renderer:Reset(mode)
+	self.view = VIEWS[mode] or VIEWS.normal
+	self.ground:SetNear(self.view.behind)
 	for id, record in pairs(self.records) do
 		self:FreeRecord(record)
 		self.records[id] = nil
@@ -984,6 +1151,9 @@ function Renderer:Reset()
 	self:FreeBoss()
 	self.fightView = 0
 	self.fogLift = 0
+	-- The camera starts each run in place, not still easing down from the
+	-- last run's flight or across from its lane.
+	self.camX, self.camZ = nil, nil
 	self.markers.count = 0
 	self.ground:DrawMarkers(self.markers)
 	self.lastRunnerX = nil
@@ -1004,17 +1174,19 @@ function Renderer:Update(world, now)
 		self.scene:Calibrate()
 	end
 	local fight = self:UpdateFightView(now)
+	local base = self.view.camera
 	-- Camera eases toward the runner's lane and rises in flight.
 	local camX = (self.camX or 0) + (state.x * 0.55 - (self.camX or 0)) * 0.12
-	local baseZ = CameraSetting("height", fight)
+	local baseZ = CameraSetting("height", fight, base)
 	local camZ = (self.camZ or baseZ) + ((state.flying and state.z + 1.5 or baseZ + state.z * 0.3) - (self.camZ or baseZ)) * 0.08
 	self.camX, self.camZ = camX, camZ
-	self.scene:SetFieldOfView(CameraSetting("fov", fight))
-	self.scene:LookAt(camX, CameraSetting("lookAhead", fight), camZ, CameraSetting("distance", fight), CameraSetting("pitch", fight))
+	self.scene:SetFieldOfView(CameraSetting("fov", fight, base))
+	self.scene:LookAt(camX, CameraSetting("lookAhead", fight, base), camZ, CameraSetting("distance", fight, base), CameraSetting("pitch", fight, base))
 
 	self:UpdateMount(world)
 	self:DrawRunner(world, now)
 	self.speed = world.speed
+	self.taurenSpeed = world.taurenSpeed
 	self.markers.count = 0
 	self:DrawBoss(world, zone.fog.far + 5, now)
 	self:UpdateFog(zone, fight)
@@ -1023,7 +1195,10 @@ function Renderer:Update(world, now)
 	local moved = world.distance - (self.joggerDistance or world.distance)
 	self.joggerDistance = world.distance
 	self:UpdateScenery(world, zone)
-	self:UpdateJoggers(world, zone, moved, now)
+	-- An orc run has its Tauren on the road instead of joggers beside it.
+	if self.view.joggers then
+		self:UpdateJoggers(world, zone, moved, now)
+	end
 	self.ground:Draw(world.distance)
 	self.ground:DrawMarkers(self.markers)
 end

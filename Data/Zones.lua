@@ -32,21 +32,48 @@ end
 -- Shared fallbacks used when a zone's own models don't load.
 local GENERIC = {
 	low = {
-		{ fileID = 199632 }, -- generic/passivedoodads/crate01/crate01.m2
-		{ fileID = 199652 }, -- deadtreelogs/deadtreelog01.m2
+		{ fileID = 199632, name = "Crate" }, -- generic/passivedoodads/crate01/crate01.m2
+		{ fileID = 199652, name = "Dead log" }, -- deadtreelogs/deadtreelog01.m2
 	},
 	high = {
-		{ fileID = 199209 }, -- generic/orc/passive doodads/orcfence/orcfence.m2
+		{ fileID = 199209, name = "Orc fence" }, -- generic/orc/passive doodads/orcfence/orcfence.m2
 	},
 	block = {
-		{ fileID = 199563 }, -- generic/passivedoodads/barrel/barrel01.m2
-		{ fileID = 199634 }, -- crate02.m2
+		{ fileID = 199563, name = "Barrel" }, -- generic/passivedoodads/barrel/barrel01.m2
+		{ fileID = 199634, name = "Big crate" }, -- crate02.m2
 	},
 	wall = {
-		{ fileID = 199634 }, -- crate02.m2
+		{ fileID = 199634, name = "Big crate" }, -- crate02.m2
 	},
 }
 ns.GenericObstacles = GENERIC
+
+-- Accessibility: brighter, easy-to-spot Classic props offered in Options as
+-- extra choices for any zone, on top of the zone's own models and the shared
+-- ones above. Never used unless picked. (Listfile via wago.tools, 2026-11-09.)
+ns.ExtraModels = {
+	low = {
+		{ fileID = 197464, name = "Powder keg with fuse" }, -- generic/dwarf/passive doodads/powderkegs/powderkegfused.m2
+	},
+	high = {
+		{ fileID = 204080, name = "Tirisfal barricade" }, -- lordaeron/tirisfalglade/passivedoodads/barricade/tirisfallbarricade.m2
+	},
+	block = {
+		{ fileID = 197463, name = "Powder keg" }, -- generic/dwarf/passive doodads/powderkegs/powderkeg01.m2
+		{ fileID = 198004, name = "Beer keg" }, -- generic/human/passive doodads/beerkegs/beerkeg01.m2
+	},
+	wall = {
+		{ fileID = 204080, name = "Tirisfal barricade" }, -- tirisfallbarricade.m2
+	},
+	coin = {
+		{ fileID = 200135, size = 0.75, name = "Large gold pile" }, -- generic/passivedoodads/treasurepiles/goldpilelarge01.m2
+	},
+	gem = {
+		{ fileID = 201056, size = 1.0, name = "Red jewel" }, -- world/goober/g_jewelred.m2
+		{ fileID = 201054, size = 1.0, name = "Blue jewel" }, -- world/goober/g_jewelblue.m2
+		{ fileID = 203112, size = 1.0, name = "Museum gem" }, -- khazmodan/blackrock/passivedoodads/museumgem/museumgem01.m2
+	},
+}
 
 ns.Zones = {
 	{
@@ -72,12 +99,12 @@ ns.Zones = {
 			{ fileID = 200426, height = 3.5 }, -- taurenlamppost.m2
 		},
 		obstacles = {
-			low = { { fileID = 202305 }, { fileID = 200372 } }, -- mullgorethorn01, largebasket01
-			high = { { fileID = 200596 }, { fileID = 200614 } }, -- warharnesswall01, windbreak02
-			block = { { fileID = 200578 }, { fileID = 202301 } }, -- taurentotem02, mullgorerock02
-			wall = { { fileID = 200615 }, { fileID = 202292 } }, -- windbreak03, burnedgypsywagon01
+			low = { { fileID = 202305, name = "Thorn bush" }, { fileID = 200372, name = "Large basket" } }, -- mullgorethorn01, largebasket01
+			high = { { fileID = 200596, name = "War harness" }, { fileID = 200614, name = "Windbreak" } }, -- warharnesswall01, windbreak02
+			block = { { fileID = 200578, name = "Tauren totem" }, { fileID = 202301, name = "Rock" } }, -- taurentotem02, mullgorerock02
+			wall = { { fileID = 200615, name = "Windbreak" }, { fileID = 202292, name = "Burned wagon" } }, -- windbreak03, burnedgypsywagon01
 		},
-		charger = { { displayID = 1230 }, { displayID = 179 }, { displayID = 38 } }, -- kodo, kodo, tallstrider
+		charger = { { displayID = 1230, name = "Kodo" }, { displayID = 179, name = "Kodo (brown)" }, { displayID = 38, name = "Tallstrider" } }, -- kodo, kodo, tallstrider
 	},
 	{
 		key = "barrens",
@@ -98,12 +125,12 @@ ns.Zones = {
 			{ fileID = 201389, height = 5 }, -- raptorhut01.m2
 		},
 		obstacles = {
-			low = { { fileID = 201371 }, { fileID = 201375 } }, -- barrensbush02, kodoegg01
-			high = { { fileID = 201364 }, { fileID = 201365 } }, -- kotobeastbone02/03
-			block = { { fileID = 201384 }, { fileID = 201377 } }, -- termite mound, lamppost
-			wall = { { fileID = 201416 }, { fileID = 201413 } }, -- barrenswagon01, bustedwagon
+			low = { { fileID = 201371, name = "Bush" }, { fileID = 201375, name = "Kodo egg" } }, -- barrensbush02, kodoegg01
+			high = { { fileID = 201364, name = "Kodo bones" }, { fileID = 201365, name = "Kodo ribs" } }, -- kotobeastbone02/03
+			block = { { fileID = 201384, name = "Termite mound" }, { fileID = 201377, name = "Lamppost" } }, -- termite mound, lamppost
+			wall = { { fileID = 201416, name = "Wagon" }, { fileID = 201413, name = "Busted wagon" } }, -- barrenswagon01, bustedwagon
 		},
-		charger = { { displayID = 1532 }, { displayID = 180 } }, -- thunder lizard, raptor
+		charger = { { displayID = 1532, name = "Thunder lizard" }, { displayID = 180, name = "Raptor" } }, -- thunder lizard, raptor
 		boss = { name = "Verog the Dervish", height = 4.3, models = { { displayID = 9446 }, { displayID = 1532 } } }, -- npc 3395
 	},
 	{
@@ -124,12 +151,12 @@ ns.Zones = {
 			{ fileID = 202690, height = 5 }, -- gnomebleachers.m2
 		},
 		obstacles = {
-			low = { { fileID = 202695 }, { fileID = 202710 } }, -- haybail straightaway01, saltflatrock_01
-			high = { { fileID = 202693 }, { fileID = 202696 } }, -- bridge, haybail straightaway02
-			block = { { fileID = 202711 }, { fileID = 202733 } }, -- saltflatrock_02, snake nest
-			wall = { { fileID = 202694 }, { fileID = 202697 } }, -- haybail back-stop, straightaway03
+			low = { { fileID = 202695, name = "Hay bale" }, { fileID = 202710, name = "Salt flat rock" } }, -- haybail straightaway01, saltflatrock_01
+			high = { { fileID = 202693, name = "Bridge" }, { fileID = 202696, name = "Hay bale bar" } }, -- bridge, haybail straightaway02
+			block = { { fileID = 202711, name = "Salt flat boulder" }, { fileID = 202733, name = "Snake nest" } }, -- saltflatrock_02, snake nest
+			wall = { { fileID = 202694, name = "Hay bale stop" }, { fileID = 202697, name = "Hay bale wall" } }, -- haybail back-stop, straightaway03
 		},
-		charger = { { displayID = 1308 }, { displayID = 322 } }, -- kodo, raptor
+		charger = { { displayID = 1308, name = "Kodo" }, { displayID = 322, name = "Raptor" } }, -- kodo, raptor
 		boss = { name = "Arnak Grimtotem", height = 4.1, models = { { displayID = 10243 }, { displayID = 1308 } } }, -- npc 10896
 	},
 	{
@@ -151,12 +178,12 @@ ns.Zones = {
 			{ fileID = 201195, height = 3 }, -- ashenvalerock01.m2
 		},
 		obstacles = {
-			low = { { fileID = 201217 }, { fileID = 201208 } }, -- treelog01, stump01
-			high = { { fileID = 201236 }, { fileID = 201218 } }, -- satyr arch, treelog02
-			block = { { fileID = 201252 }, { fileID = 201211 } }, -- satyr totem, tree stump
-			wall = { { fileID = 201246 }, { fileID = 201247 } }, -- satyr ruin walls
+			low = { { fileID = 201217, name = "Log" }, { fileID = 201208, name = "Stump" } }, -- treelog01, stump01
+			high = { { fileID = 201236, name = "Satyr arch" }, { fileID = 201218, name = "Fallen log" } }, -- satyr arch, treelog02
+			block = { { fileID = 201252, name = "Satyr totem" }, { fileID = 201211, name = "Tree stump" } }, -- satyr totem, tree stump
+			wall = { { fileID = 201246, name = "Satyr ruin wall" }, { fileID = 201247, name = "Satyr ruin" } }, -- satyr ruin walls
 		},
-		charger = { { displayID = 1917 }, { displayID = 706 }, { displayID = 145 } }, -- stag, bear, furbolg
+		charger = { { displayID = 1917, name = "Stag" }, { displayID = 706, name = "Bear" }, { displayID = 145, name = "Furbolg" } }, -- stag, bear, furbolg
 		boss = { name = "Ursangous", height = 4.3, models = { { displayID = 2281 }, { displayID = 706 } } }, -- npc 12678
 	},
 	{
@@ -178,12 +205,12 @@ ns.Zones = {
 			{ fileID = 189118, height = 3 }, -- orcbonfire.m2
 		},
 		obstacles = {
-			low = { { fileID = 189218 }, { fileID = 189226 } }, -- lavarock01, burnedbeam
-			high = { { fileID = 189135 }, { fileID = 189124 } }, -- fence, rope bridge
-			block = { { fileID = 189212 }, { fileID = 189236 } }, -- boulders01, stoneblock01
-			wall = { { fileID = 189213 }, { fileID = 189135 } }, -- boulders02, fence
+			low = { { fileID = 189218, name = "Lava rock" }, { fileID = 189226, name = "Burned beam" } }, -- lavarock01, burnedbeam
+			high = { { fileID = 189135, name = "Fence" }, { fileID = 189124, name = "Rope bridge" } }, -- fence, rope bridge
+			block = { { fileID = 189212, name = "Boulders" }, { fileID = 189236, name = "Stone block" } }, -- boulders01, stoneblock01
+			wall = { { fileID = 189213, name = "Boulder pile" }, { fileID = 189135, name = "Fence" } }, -- boulders02, fence
 		},
-		charger = { { displayID = 1070 }, { displayID = 10193 } }, -- fire elemental, core hound
+		charger = { { displayID = 1070, name = "Fire elemental" }, { displayID = 10193, name = "Core hound" } }, -- fire elemental, core hound
 		boss = { name = "Volchan", height = 5.4, models = { { displayID = 12232 }, { displayID = 1070 } } }, -- npc 10119
 	},
 	{
@@ -204,12 +231,12 @@ ns.Zones = {
 			{ fileID = 202553, height = 9 }, -- quirajpillar.m2
 		},
 		obstacles = {
-			low = { { fileID = 202490 }, { fileID = 202477 } }, -- silithid egg, crystal nub
-			high = { { fileID = 202498 }, { fileID = 202587 } }, -- ruin arch, wasp husk
-			block = { { fileID = 202534 }, { fileID = 202555 } }, -- silithus pod, quiraj ruin block
-			wall = { { fileID = 202573 }, { fileID = 202565 } }, -- ruins wall, quiraj wall
+			low = { { fileID = 202490, name = "Silithid egg" }, { fileID = 202477, name = "Crystal nub" } }, -- silithid egg, crystal nub
+			high = { { fileID = 202498, name = "Ruin arch" }, { fileID = 202587, name = "Wasp husk" } }, -- ruin arch, wasp husk
+			block = { { fileID = 202534, name = "Silithid pod" }, { fileID = 202555, name = "Qiraji block" } }, -- silithus pod, quiraj ruin block
+			wall = { { fileID = 202573, name = "Ruin wall" }, { fileID = 202565, name = "Qiraji wall" } }, -- ruins wall, quiraj wall
 		},
-		charger = { { displayID = 91 }, { displayID = 157 }, { displayID = 92 } }, -- silithid tank, silithid, wasp
+		charger = { { displayID = 91, name = "Silithid tank" }, { displayID = 157, name = "Silithid" }, { displayID = 92, name = "Wasp" } }, -- silithid tank, silithid, wasp
 		boss = { name = "Krellack", height = 4.1, models = { { displayID = 6068 }, { displayID = 91 } } }, -- npc 14476
 	},
 	{
@@ -230,12 +257,12 @@ ns.Zones = {
 			{ fileID = 202770, height = 4 }, -- ungororock06.m2
 		},
 		obstacles = {
-			low = { { fileID = 202771 }, { fileID = 366958 } }, -- ungororock07, coconut bunch
-			high = { { fileID = 202747 }, { fileID = 202784 } }, -- ungoro archway, tree break 2
-			block = { { fileID = 202772 }, { fileID = 202755 } }, -- ungororock08, yellow crystal
-			wall = { { fileID = 202773 }, { fileID = 202774 } }, -- ungororock09/10
+			low = { { fileID = 202771, name = "Rock" }, { fileID = 366958, name = "Coconuts" } }, -- ungororock07, coconut bunch
+			high = { { fileID = 202747, name = "Archway" }, { fileID = 202784, name = "Fallen tree" } }, -- ungoro archway, tree break 2
+			block = { { fileID = 202772, name = "Boulder" }, { fileID = 202755, name = "Yellow crystal" } }, -- ungororock08, yellow crystal
+			wall = { { fileID = 202773, name = "Rock wall" }, { fileID = 202774, name = "Rock slab" } }, -- ungororock09/10
 		},
-		charger = { { displayID = 5238 }, { displayID = 615 } }, -- devilsaur, raptor
+		charger = { { displayID = 5238, name = "Devilsaur" }, { displayID = 615, name = "Raptor" } }, -- devilsaur, raptor
 		boss = { name = "King Mosh", height = 6, models = { { displayID = 5305 }, { displayID = 5238 } } }, -- npc 6584
 	},
 	{
@@ -257,12 +284,12 @@ ns.Zones = {
 			{ fileID = 202841, height = 4 }, -- furbolgtotemsnow01.m2
 		},
 		obstacles = {
-			low = { { fileID = 202872 }, { fileID = 202868 } }, -- fallen branch, bush
-			high = { { fileID = 202873 }, { fileID = 202884 } }, -- fallen tree, world tree root
-			block = { { fileID = 202846 }, { fileID = 202842 } }, -- rock02, furbolg totem 2
-			wall = { { fileID = 202847 }, { fileID = 202874 } }, -- rock03, fallen tree 2
+			low = { { fileID = 202872, name = "Fallen branch" }, { fileID = 202868, name = "Bush" } }, -- fallen branch, bush
+			high = { { fileID = 202873, name = "Fallen tree" }, { fileID = 202884, name = "Giant root" } }, -- fallen tree, world tree root
+			block = { { fileID = 202846, name = "Rock" }, { fileID = 202842, name = "Furbolg totem" } }, -- rock02, furbolg totem 2
+			wall = { { fileID = 202847, name = "Rock wall" }, { fileID = 202874, name = "Fallen trunk" } }, -- rock03, fallen tree 2
 		},
-		charger = { { displayID = 10579 }, { displayID = 21601 }, { displayID = 10914 }, { displayID = 161 } }, -- Ice Thistle Yeti, older yeti with other skins, wooly kodo, wolf
+		charger = { { displayID = 10579, name = "Ice Thistle yeti" }, { displayID = 21601, name = "Yeti" }, { displayID = 10914, name = "Woolly kodo" }, { displayID = 161, name = "Wolf" } }, -- Ice Thistle Yeti, older yeti with other skins, wooly kodo, wolf
 		boss = { name = "Rak'shiri", height = 3.4, models = { { displayID = 10054 }, { displayID = 10579 } } }, -- npc 10200
 	},	{
 		key = "westfall",
@@ -283,12 +310,12 @@ ns.Zones = {
 			{ fileID = 190612, height = 4 }, -- westfalllamppost.m2
 		},
 		obstacles = {
-			low = { { fileID = 190598 }, { fileID = 190619 } }, -- haystack02, plow
-			high = { { fileID = 190659 }, { fileID = 190620 } }, -- westfallfence, rakecart
-			block = { { fileID = 190623 }, { fileID = 190535 } }, -- boulder01, barrel01
-			wall = { { fileID = 190599 }, { fileID = 190536 } }, -- haywagon, brokencart
+			low = { { fileID = 190598, name = "Haystack" }, { fileID = 190619, name = "Plow" } }, -- haystack02, plow
+			high = { { fileID = 190659, name = "Fence" }, { fileID = 190620, name = "Rake cart" } }, -- westfallfence, rakecart
+			block = { { fileID = 190623, name = "Boulder" }, { fileID = 190535, name = "Barrel" } }, -- boulder01, barrel01
+			wall = { { fileID = 190599, name = "Hay wagon" }, { fileID = 190536, name = "Broken cart" } }, -- haywagon, brokencart
 		},
-		charger = { { displayID = 378 }, { displayID = 367 } }, -- Harvest Watcher, Harvest Golem
+		charger = { { displayID = 378, name = "Harvest Watcher" }, { displayID = 367, name = "Harvest Golem" } }, -- Harvest Watcher, Harvest Golem
 		boss = { name = "Edwin VanCleef", height = 3.8, models = { { displayID = 2029 }, { displayID = 378 } } }, -- npc 639
 	},
 	{
@@ -310,12 +337,12 @@ ns.Zones = {
 			{ fileID = 198780, height = 3.5 }, -- generic/nightelf/passive doodads/lanterns/nightelflantern01.m2
 		},
 		obstacles = {
-			low = { { fileID = 202263 }, { fileID = 202044 } }, -- moongladebush02, kalidartreelog01
-			high = { { fileID = 202045 }, { fileID = 198762 } }, -- kalidartreelog02, kalidargazibo
-			block = { { fileID = 202259 }, { fileID = 198949 } }, -- druidstonetopless, kalidarstonerune01
-			wall = { { fileID = 198834 }, { fileID = 198835 } }, -- nightelfruins01/02
+			low = { { fileID = 202263, name = "Bush" }, { fileID = 202044, name = "Log" } }, -- moongladebush02, kalidartreelog01
+			high = { { fileID = 202045, name = "Fallen log" }, { fileID = 198762, name = "Gazebo" } }, -- kalidartreelog02, kalidargazibo
+			block = { { fileID = 202259, name = "Druid stone" }, { fileID = 198949, name = "Rune stone" } }, -- druidstonetopless, kalidarstonerune01
+			wall = { { fileID = 198834, name = "Ruins" }, { fileID = 198835, name = "Ruined wall" } }, -- nightelfruins01/02
 		},
-		charger = { { displayID = 12236 }, { displayID = 12238 }, { displayID = 1917 } }, -- Moonkin Oracle, Vicious Owlbeast, stag
+		charger = { { displayID = 12236, name = "Moonkin" }, { displayID = 12238, name = "Owlbeast" }, { displayID = 1917, name = "Stag" } }, -- Moonkin Oracle, Vicious Owlbeast, stag
 		boss = { name = "Omen", height = 6, models = { { displayID = 15879 }, { displayID = 12238 } } }, -- npc 15467
 	},
 	{
@@ -337,12 +364,12 @@ ns.Zones = {
 			{ fileID = 189825, height = 4 }, -- lamppost.m2
 		},
 		obstacles = {
-			low = { { fileID = 198158 }, { fileID = 189810 } }, -- crategrain01, haystack01
-			high = { { fileID = 189795 }, { fileID = 197851 } }, -- elwynnwoodfence01, gardenarch
-			block = { { fileID = 198004 }, { fileID = 189956 } }, -- beerkeg01, waterbasin
-			wall = { { fileID = 198288 }, { fileID = 189840 } }, -- stormwindgypsywagon01, ruinedcatapult
+			low = { { fileID = 198158, name = "Grain crate" }, { fileID = 189810, name = "Haystack" } }, -- crategrain01, haystack01
+			high = { { fileID = 189795, name = "Wooden fence" }, { fileID = 197851, name = "Garden arch" } }, -- elwynnwoodfence01, gardenarch
+			block = { { fileID = 198004, name = "Beer keg" }, { fileID = 189956, name = "Water basin" } }, -- beerkeg01, waterbasin
+			wall = { { fileID = 198288, name = "Wagon" }, { fileID = 189840, name = "Ruined catapult" } }, -- stormwindgypsywagon01, ruinedcatapult
 		},
-		charger = { { displayID = 3167 }, { displayID = 3258 } }, -- Stormwind City Guard, Stormwind Guard
+		charger = { { displayID = 3167, name = "City guard" }, { displayID = 3258, name = "Guard" } }, -- Stormwind City Guard, Stormwind Guard
 		boss = { name = "Highlord Bolvar Fordragon", height = 4, models = { { displayID = 5566 }, { displayID = 3167 } } }, -- npc 1748
 	},
 	{
@@ -364,12 +391,12 @@ ns.Zones = {
 			{ fileID = 198754, height = 3 }, -- elvenfountain.m2
 		},
 		obstacles = {
-			low = { { fileID = 202022 }, { fileID = 202059 } }, -- kalidarbush02, kalidartreestump01
-			high = { { fileID = 198761 }, { fileID = 202034 } }, -- kalidarmoongate, kalidargiantroot01
-			block = { { fileID = 198936 }, { fileID = 198950 } }, -- kalidarwoodstatue01, kalidarstonerune02
-			wall = { { fileID = 198824 }, { fileID = 198825 } }, -- newelfruin01/02
+			low = { { fileID = 202022, name = "Bush" }, { fileID = 202059, name = "Tree stump" } }, -- kalidarbush02, kalidartreestump01
+			high = { { fileID = 198761, name = "Moongate" }, { fileID = 202034, name = "Giant root" } }, -- kalidarmoongate, kalidargiantroot01
+			block = { { fileID = 198936, name = "Wooden statue" }, { fileID = 198950, name = "Rune stone" } }, -- kalidarwoodstatue01, kalidarstonerune02
+			wall = { { fileID = 198824, name = "Elf ruin" }, { fileID = 198825, name = "Elf ruin wall" } }, -- newelfruin01/02
 		},
-		charger = { { displayID = 6805 }, { displayID = 1917 } }, -- Nightsaber, stag
+		charger = { { displayID = 6805, name = "Nightsaber" }, { displayID = 1917, name = "Stag" } }, -- Nightsaber, stag
 		boss = { name = "Tyrande Whisperwind", height = 4, models = { { displayID = 7274 }, { displayID = 6805 } } }, -- npc 7999
 	},
 	{
@@ -391,12 +418,12 @@ ns.Zones = {
 			{ fileID = 203226, height = 4 }, -- ironforgesteamtank.m2
 		},
 		obstacles = {
-			low = { { fileID = 203265 }, { fileID = 197603 } }, -- ironstump01, alekegsingle
-			high = { { fileID = 203158 }, { fileID = 203213 } }, -- dunmoroghstonefence01, ironforgesignpost
-			block = { { fileID = 197238 }, { fileID = 197463 } }, -- dwarvenbarrel01, powderkeg01
-			wall = { { fileID = 203230 }, { fileID = 203159 } }, -- ironforgesteamtankruined01, dunmoroghstonefence02
+			low = { { fileID = 203265, name = "Iron stump" }, { fileID = 197603, name = "Ale keg" } }, -- ironstump01, alekegsingle
+			high = { { fileID = 203158, name = "Stone fence" }, { fileID = 203213, name = "Signpost" } }, -- dunmoroghstonefence01, ironforgesignpost
+			block = { { fileID = 197238, name = "Dwarven barrel" }, { fileID = 197463, name = "Powder keg" } }, -- dwarvenbarrel01, powderkeg01
+			wall = { { fileID = 203230, name = "Ruined steam tank" }, { fileID = 203159, name = "Stone wall" } }, -- ironforgesteamtankruined01, dunmoroghstonefence02
 		},
-		charger = { { displayID = 3524 }, { displayID = 704 } }, -- Ironforge Guard, Mountain Boar
+		charger = { { displayID = 3524, name = "Ironforge guard" }, { displayID = 704, name = "Mountain boar" } }, -- Ironforge Guard, Mountain Boar
 		boss = { name = "King Magni Bronzebeard", height = 3.6, models = { { displayID = 3597 }, { displayID = 3524 } } }, -- npc 2784
 	},
 	{
@@ -418,12 +445,12 @@ ns.Zones = {
 			{ fileID = 200406, height = 3 }, -- hitchingposts/taurenhitchingpost.m2
 		},
 		obstacles = {
-			low = { { fileID = 200420 }, { fileID = 200373 } }, -- kodoskulls01, largebasket02
-			high = { { fileID = 200406 }, { fileID = 200615 } }, -- taurenhitchingpost, windbreak03
-			block = { { fileID = 200409 }, { fileID = 200579 } }, -- taurenkiln01, taurentotem03
-			wall = { { fileID = 200431 }, { fileID = 199195 } }, -- taurenloomblue, kodowagon
+			low = { { fileID = 200420, name = "Kodo skulls" }, { fileID = 200373, name = "Large basket" } }, -- kodoskulls01, largebasket02
+			high = { { fileID = 200406, name = "Hitching post" }, { fileID = 200615, name = "Windbreak" } }, -- taurenhitchingpost, windbreak03
+			block = { { fileID = 200409, name = "Kiln" }, { fileID = 200579, name = "Tauren totem" } }, -- taurenkiln01, taurentotem03
+			wall = { { fileID = 200431, name = "Blue loom" }, { fileID = 199195, name = "Kodo wagon" } }, -- taurenloomblue, kodowagon
 		},
-		charger = { { displayID = 1220 }, { displayID = 1230 } }, -- Adult Plainstrider, kodo
+		charger = { { displayID = 1220, name = "Plainstrider" }, { displayID = 1230, name = "Kodo" } }, -- Adult Plainstrider, kodo
 	},
 	{
 		key = "orgrimmar",
@@ -444,12 +471,12 @@ ns.Zones = {
 			{ fileID = 202360, height = 3 }, -- kalimdor/orgrimmar/passivedoodads/orgrimmarbonfire01.m2
 		},
 		obstacles = {
-			low = { { fileID = 199094 }, { fileID = 199049 } }, -- orccrate01, boarskull
-			high = { { fileID = 199209 }, { fileID = 199203 } }, -- orcfence, rawmeatrack01
-			block = { { fileID = 199090 }, { fileID = 199141 } }, -- orcbarrel01, tallbrazier01
-			wall = { { fileID = 199414 }, { fileID = 199415 } }, -- orcwagon01/02
+			low = { { fileID = 199094, name = "Orc crate" }, { fileID = 199049, name = "Boar skull" } }, -- orccrate01, boarskull
+			high = { { fileID = 199209, name = "Orc fence" }, { fileID = 199203, name = "Meat rack" } }, -- orcfence, rawmeatrack01
+			block = { { fileID = 199090, name = "Orc barrel" }, { fileID = 199141, name = "Tall brazier" } }, -- orcbarrel01, tallbrazier01
+			wall = { { fileID = 199414, name = "Orc wagon" }, { fileID = 199415, name = "Orc cart" } }, -- orcwagon01/02
 		},
-		charger = { { displayID = 381 }, { displayID = 193 } }, -- Dire Mottled Boar, Elder Mottled Boar
+		charger = { { displayID = 381, name = "Dire Mottled Boar" }, { displayID = 193, name = "Elder Mottled Boar" } }, -- Dire Mottled Boar, Elder Mottled Boar
 	},
 	{
 		key = "undercity",
@@ -470,12 +497,12 @@ ns.Zones = {
 			{ fileID = 204105, height = 2 }, -- lordaeron/tirisfalglade/passivedoodads/brillgraves01.m2
 		},
 		obstacles = {
-			low = { { fileID = 204104 }, { fileID = 200672 } }, -- brillcoffins, meatwagonwheel
-			high = { { fileID = 200761 }, { fileID = 204080 } }, -- undeadstonewroughtironfence, tirisfallbarricade
-			block = { { fileID = 200655 }, { fileID = 200772 } }, -- lordaeronbrazier01, undead_crankwheel
-			wall = { { fileID = 200666 }, { fileID = 204090 } }, -- meatwagonwrecked01, massgrave
+			low = { { fileID = 204104, name = "Coffins" }, { fileID = 200672, name = "Wagon wheel" } }, -- brillcoffins, meatwagonwheel
+			high = { { fileID = 200761, name = "Iron fence" }, { fileID = 204080, name = "Barricade" } }, -- undeadstonewroughtironfence, tirisfallbarricade
+			block = { { fileID = 200655, name = "Brazier" }, { fileID = 200772, name = "Crank wheel" } }, -- lordaeronbrazier01, undead_crankwheel
+			wall = { { fileID = 200666, name = "Wrecked wagon" }, { fileID = 204090, name = "Mass grave" } }, -- meatwagonwrecked01, massgrave
 		},
-		charger = { { displayID = 10699 }, { displayID = 11401 } }, -- Undercity Guardian, Skeletal Executioner
+		charger = { { displayID = 10699, name = "Undercity Guardian" }, { displayID = 11401, name = "Skeletal Executioner" } }, -- Undercity Guardian, Skeletal Executioner
 	},
 }
 

@@ -71,6 +71,8 @@ Every WoW method the addon calls was checked against the generated API docs at t
 | `/schmoove sound` | Turns sound on or off |
 | `/schmoove duck` | Turns ducking on or off. Off swaps every high bar for a block, so runs stay fair |
 | `/schmoove zones 15`, `25`, `35` or `45` | Seconds per zone; the start screen's Zones button cycles the same choices |
+| `/schmoove speed 8`, `11` or `14` | Starting speed (Slow, Normal, Fast); the start screen's Start button cycles the same choices |
+| `/schmoove options` | Opens Options (also on the start and pause screens and in the minimap menu) |
 
 The minimap button (kodo icon) also opens or closes the game. Drag it to move it.
 
@@ -94,7 +96,7 @@ Only these keys are kept from the rest of WoW while a run is live; anything else
 |---|---|
 | Zones | Mulgore first, then the other 15 in a random order, with no repeats until all have been seen: The Barrens, Thousand Needles, Ashenvale, Burning Steppes, Silithus, Un'Goro Crater, Winterspring, Westfall, Moonglade, Stormwind City, Darnassus, Ironforge, Thunder Bluff, Orgrimmar and Undercity. The cities use Classic tilesets and racial props; city chargers are guards (Stormwind, Ironforge) or local beasts |
 | Zone length | 25 seconds by default (Normal). Frantic 15, Relaxed 35 and Marathon 45 are on the start screen. Each zone is one difficulty step, so shorter zones bring speed-ups and new obstacles sooner. Time spent fighting a boss doesn't count toward a zone. Saved scores record the zone length used |
-| Speed | Starts at 11 yd/s, rises 0.03 yd/s every second, and jumps 2.2 yd/s on entering each zone, up to 38 yd/s |
+| Speed | Starts at 11 yd/s (or 8 or 14, see Options), rises 0.03 yd/s every second, and jumps 2.2 yd/s on entering each zone, up to 38 yd/s. A slow start multiplies the final score by 0.75 and a fast one by 1.25 (`Tuning.startSpeeds`); saved runs record their starting speed |
 | Obstacles | Low (jump), high bar on two posts (duck, from zone 2), block, two-lane wall (from zone 2), charging creature (from zone 3), combos from zone 4 |
 | Tokens | Gold coins 10 points, gems 50. Lines, jump arcs and sky lines while flying |
 | Time points | 10 per second, plus 2 per second for each zone reached |
@@ -106,6 +108,16 @@ Only these keys are kept from the rest of WoW while a run is live; anything else
 | Power-ups | Wind Rider (fly over everything, 8 s), Magnet (10 s), Thick Hide (absorbs one hit), Gold Rush (tokens x2, 12 s), Stampede (smash through, 5 s, from zone 3) |
 
 All numbers are in `Data/Tuning.lua`.
+
+## Options and accessibility
+
+Options opens over the start or pause screen (opening it mid-run pauses the run); Esc or Done closes it.
+
+| | |
+|---|---|
+| Game | Sound, Ducking, Resume countdown, Zone length, Starting speed and Window size. Ducking, zone length and starting speed apply from the next run, as with the commands |
+| Resume countdown | On by default: after Resume, a big 3, 2, 1 in the middle of the view and nothing moves (keys wait) until it ends. Pausing during it stops it |
+| Models | For each zone, the model each hazard (low, high bar, block, wall), charger, coin and gem uses, with a turning preview. The choices are the zone's own models, the shared fallbacks and brighter extras (`ns.ExtraModels` in `Data/Zones.lua`: a fused powder keg, the Tirisfal barricade, a powder keg and a beer keg, a large gold pile, red and blue jewels and the Blackrock museum gem). A pick is saved per zone (`SchmoovinManDB.models`), goes first in that role's chain from then on, and falls back to the usual model if it isn't in the client; the preview says "Not in this client" for those. Every model has a `name` for this list. `Render/Models.lua` builds the chains |
 
 ## Scores
 
@@ -123,6 +135,8 @@ Scores are trusted as sent, with no cheat protection. WoW only writes saved data
 | `Data/Tuning.lua` | Every gameplay number |
 | `Data/Assets.lua` | Runner, wind rider, token and power-up models; animation IDs; sounds |
 | `Data/Zones.lua` | Per-zone ground textures, sky, fog, lighting, scenery, obstacle models and chargers |
+| `Render/Models.lua` | Which model each hazard, charger, coin and gem uses, with Options picks first |
+| `UI/Options.lua` | The Options screen and its model preview |
 | `Game/*.lua` | The simulation: pure Lua with no WoW API, tested outside the game |
 | `Render/*.lua` | ModelScene, ground and model drawing, adapted from Dop's Decor Draft |
 | `UI/*.lua` | Window, HUD, screens and the game loop |
@@ -164,8 +178,9 @@ A design mock-up was approved on 2026-11-06. It shows the live run, a zone chang
 
 | Check | Result |
 |---|---|
-| Lua syntax | All 22 Lua files parse as Lua 5.1 (luaparse 0.3.1) |
+| Lua syntax | All 25 Lua files parse as Lua 5.1 (luaparse 0.3.1) |
 | Logic tests (`tests/schmoovin_spec.lua`, fengari) | On 0.7.0, with the multi-lane patterns: 396 of 396 passed with 25 s zones (20 seeds x 10 minutes); 356 of 356 with 15 s zones (10 seeds x 10 minutes); ducking on and off in both. The duck-only patterns are confirmed impossible without ducking and never picked with it off |
+| 0.11.0 (2026-11-09, fengari) | Logic tests: 447 of 447 with 15 s zones (4 seeds x 5 minutes, as CI runs them) and 440 of 440 with 25 s zones (3 seeds x 3 minutes). New checks cover slow and fast starts: their speed, the score multiplier, fair spawns and the bot surviving them. The smoke test passed, now also covering `/schmoove speed`, the resume countdown, every Options row, model picks, their preview and that every zone and role offers named choices, and that resuming or starting a run closes Options |
 | Smoke test (`tests/schmoovin_smoke.lua`) | Passed on 0.7.0, plus grouped high bars showing only outer posts, including every window size, the Zones button, `/schmoove zones`, joggers and speech bubbles, the Tauren exchange (your compliment, then their reply) and that orcs never get Tauren lines, posts under high bars, and the backdrop, panel button and close button templates. |
 | API names | Every widget and ModelScene method called is declared in Forever's generated docs at the pinned commit |
 | Asset IDs | Every file ID and display ID exists in the listfile and wago.tools tables. Whether Forever ships each file is untested |

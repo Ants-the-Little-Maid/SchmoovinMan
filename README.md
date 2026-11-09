@@ -22,7 +22,9 @@ Open it with `/schmoove` or the kodo button on the minimap. Right-click the butt
 - **Alliance joggers** get in your lane. Run into them to knock them flying, with a one-liner from your Tauren. They never end your run, and you can jump over them if you'd rather.
 - **Scoring**: points for tokens, for time survived, and for style: +2 for every obstacle you jump over, +3 for every bar you duck under and +5 for every Alliance jogger you knock over. Bosses pay +50 a spear, +500 for driving one off and +150 for outlasting one.
 - **Scores**: a personal top 10 shared across your characters, plus a guild board with guildmates who have the addon.
-- **Your pace**: zones last 15, 25, 35 or 45 seconds, and the window comes in four sizes.
+- **Your pace**: zones last 15, 25, 35 or 45 seconds, and runs start slow (8 yd/s, scores x0.75), normal (11) or fast (14, scores x1.25). The window comes in four sizes.
+- **Options** in the game window (the start and pause screens, or `/schmoove options`): sound, ducking, zone length, starting speed, window size and a 3-2-1 countdown before a paused run goes on.
+- **Easier to see**: if a hazard, charger, coin or gem is hard to see in some zone, swap it in Options for another, with a turning preview. Each zone offers its own models plus brighter picks such as powder kegs, a barricade, red and blue jewels and a large gold pile.
 
 Every run is fair: there is always a free lane or a way to jump or duck through. The addon's tests check this on long simulated runs.
 
@@ -44,7 +46,9 @@ You can't start a run in combat, and entering combat pauses the run. Only the ga
 |---|---|
 | `/schmoove` | Open or close the game |
 | `/schmoove start` | Open the game straight into a run |
+| `/schmoove options` | Open the options |
 | `/schmoove zones 15`, `25`, `35` or `45` | Seconds per zone; shorter is harder |
+| `/schmoove speed 8`, `11` or `14` | Starting speed; slow scores x0.75, fast x1.25 |
 | `/schmoove duck` | Turn ducking off (high bars become blocks) or back on |
 | `/schmoove sound` | Turn sound on or off |
 

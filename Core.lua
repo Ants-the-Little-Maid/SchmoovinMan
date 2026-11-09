@@ -15,7 +15,14 @@ local DEFAULTS = {
 		duck = true,
 		windowSize = "medium",
 		zoneLength = 25,
+		startSpeed = 11,
+		-- A 3-2-1 countdown before a paused run goes on.
+		countdown = true,
 	},
+	-- Models picked in Options, by zone key and role: the candidate's key
+	-- (see ns.Models.Key in Render/Models.lua), shown first in place of the
+	-- zone's usual model.
+	models = {},
 	stats = {
 		runs = 0,
 		tokens = 0,
@@ -94,6 +101,7 @@ ns.RegisterEvent("ADDON_LOADED", function(loadedName)
 	ns.db = SchmoovinManDB
 	ns.Tuning.duckEnabled = ns.db.settings.duck ~= false
 	ns.SetZoneLength(ns.db.settings.zoneLength)
+	ns.SetStartSpeed(ns.db.settings.startSpeed)
 	for _, callback in ipairs(loadCallbacks) do
 		callback()
 	end
@@ -135,6 +143,53 @@ function ns.CycleZoneLength()
 	return ns.SetZoneLength(25)
 end
 
+-- Sets the starting speed to one of the allowed choices, with its score
+-- multiplier; returns the choice.
+function ns.SetStartSpeed(speed)
+	local chosen = ns.Tuning.startSpeeds[2]
+	for _, choice in ipairs(ns.Tuning.startSpeeds) do
+		if choice.speed == tonumber(speed) then
+			chosen = choice
+		end
+	end
+	ns.Tuning.baseSpeed = chosen.speed
+	ns.Tuning.scoreMultiplier = chosen.multiplier
+	if ns.db then
+		ns.db.settings.startSpeed = chosen.speed
+	end
+	return chosen
+end
+
+-- The starting speed choice in use.
+function ns.StartSpeedChoice()
+	for _, choice in ipairs(ns.Tuning.startSpeeds) do
+		if choice.speed == ns.Tuning.baseSpeed then
+			return choice
+		end
+	end
+	return ns.Tuning.startSpeeds[2]
+end
+
+-- "11 yd/s (Normal)", with the multiplier when it isn't 1.
+function ns.StartSpeedText(choice)
+	choice = choice or ns.StartSpeedChoice()
+	if choice.multiplier == 1 then
+		return ("%d yd/s (%s)"):format(choice.speed, choice.name)
+	end
+	return ("%d yd/s (%s, score x%s)"):format(choice.speed, choice.name, tostring(choice.multiplier))
+end
+
+-- Moves to the next starting speed choice, wrapping round.
+function ns.CycleStartSpeed()
+	local choices = ns.Tuning.startSpeeds
+	for index, choice in ipairs(choices) do
+		if choice.speed == ns.Tuning.baseSpeed then
+			return ns.ChooseStartSpeed(choices[index % #choices + 1].speed)
+		end
+	end
+	return ns.ChooseStartSpeed(11)
+end
+
 local function PrintHelp()
 	ns.Print("Commands:")
 	print("  /schmoove - open or close the game")
@@ -142,6 +197,8 @@ local function PrintHelp()
 	print("  /schmoove sound - turn sound on or off")
 	print("  /schmoove duck - turn ducking on or off (off swaps high bars for blocks)")
 	print("  /schmoove zones 15|25|35|45 - seconds per zone (shorter is harder)")
+	print("  /schmoove speed 8|11|14 - starting speed (slower scores less, faster more)")
+	print("  /schmoove options - open the options")
 end
 
 -- Setting changes shared by the slash commands and the minimap menu.
@@ -163,6 +220,18 @@ function ns.ChooseZoneLength(seconds)
 	return choice
 end
 
+-- So does the starting speed.
+function ns.ChooseStartSpeed(speed)
+	local choice = ns.SetStartSpeed(speed)
+	ns.Controller:RefreshStart()
+	return choice
+end
+
+-- The resume countdown applies straight away.
+function ns.SetCountdown(enabled)
+	ns.db.settings.countdown = enabled and true or false
+end
+
 ns.commands["sound"] = function()
 	ns.SetSound(not ns.db.settings.sound)
 	ns.Print("Sound " .. (ns.db.settings.sound and "on." or "off."))
@@ -178,8 +247,28 @@ ns.commands["zones"] = function(rest)
 	ns.Print(("Zones last %d seconds (%s). Takes effect from your next run."):format(choice.seconds, choice.name))
 end
 
+ns.commands["speed"] = function(rest)
+	local choice = ns.ChooseStartSpeed(rest)
+	ns.Print(("Runs start at %s. Takes effect from your next run."):format(ns.StartSpeedText(choice)))
+end
+
+ns.commands["options"] = function()
+	ns.Controller:OpenOptions()
+end
+
 ns.commands["start"] = function()
 	ns.Controller:QuickStart()
+end
+
+-- Left out of the help: makes every run an orc run (see Data/OrcRun.lua), on
+-- any character, until it's turned off or the UI reloads. For trying it out.
+ns.commands["orc"] = function()
+	ns.OrcRun.forced = not ns.OrcRun.forced
+	if ns.OrcRun.forced then
+		ns.Print("Orc runs forced on: every run is one until you turn it off or reload.")
+	else
+		ns.Print("Orc runs back to normal.")
+	end
 end
 
 ns.commands["help"] = PrintHelp

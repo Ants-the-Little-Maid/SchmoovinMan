@@ -166,12 +166,40 @@ function Hud.Create(layer)
 	self.banner = banner
 	self.bannerUntil = 0
 
+	-- The resume countdown: a big 3, 2, 1 in the middle of the view.
+	self.countdown = UI.Text(layer, 72, C.gold, nil, "OUTLINE")
+	self.countdown:SetPoint("CENTER", 0, 30)
+	self.countdown:Hide()
+
 	self:SetHint(ns.Tuning.duckEnabled)
 	return self
 end
 
-function Hud:SetHint(duckEnabled)
-	self.hintText:SetText(duckEnabled and "A/D lanes  -  W jump  -  S duck  -  Esc pause" or "A/D lanes  -  W jump  -  Esc pause")
+-- Shows the countdown's number, or hides it with nil.
+function Hud:ShowCountdown(number)
+	if number == self.countdownNumber then
+		return
+	end
+	self.countdownNumber = number
+	if number then
+		self.countdown:SetText(tostring(number))
+		self.countdown:Show()
+	else
+		self.countdown:Hide()
+	end
+end
+
+-- mode: nil, or "orc" for an orc run, where only dodging helps.
+function Hud:SetHint(duckEnabled, mode)
+	local text
+	if mode == "orc" then
+		text = "A/D dodge  -  Esc pause"
+	elseif duckEnabled then
+		text = "A/D lanes  -  W jump  -  S duck  -  Esc pause"
+	else
+		text = "A/D lanes  -  W jump  -  Esc pause"
+	end
+	self.hintText:SetText(text)
 	self.hint:SetWidth(self.hintText:GetStringWidth() + 24)
 end
 
@@ -269,7 +297,8 @@ function Hud:Update(world, best, zoneName, now)
 	local intoZone = world.course - world.zoneStart
 	self.zoneBar:SetValue(intoZone / tuning.zoneLength)
 	self.zone:SetText(zoneName)
-	self.speed:SetText(string.format("%.1f yd/s", world.speed))
+	-- In an orc run, the Tauren's speed: yours stays put.
+	self.speed:SetText(string.format("%.1f yd/s", world.taurenSpeed or world.speed))
 	if world:InFight() then
 		self.zoneNext:SetText(string.format("Zone %d - paused", world.zoneIndex))
 	else

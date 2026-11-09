@@ -7,17 +7,23 @@ API for the renderer and UI:
       options.zones          ordered zone keys; the first is always first
       options.recordTimeline true to keep world.timeline ({t, lane, code})
       options.bosses         false to leave bosses out
+      options.mode           "orc" for an orc run (see Data/OrcRun.lua): you
+                             keep the zone-1 speed while Tauren come up from
+                             behind, faster and faster; only coins come from
+                             ahead, with no bosses, power-ups or Alliance joggers
   world:Step(dt)             advances in fixed steps (tuning.step)
   world:Input(action)        "left" | "right" | "jump" | "duck"
   world:DrainEvents()        returns and clears this frame's events
 
 Fields:
+  mode (nil, or "orc")
   time (seconds run), course (the zone clock: time less the time spent in boss
-      fights, which zones and speed follow), speed (shown speed), distance
+      fights, which zones and speed follow), speed (your speed), distance
       (yards run, for scrolling the ground)
+  taurenSpeed (orc runs only: the Tauren's speed, the one shown)
   zoneIndex, zoneKey, zoneStart (course time the current zone began)
   score, tokenPoints, timePoints, movePoints, bossPoints, tokens, gems, jumps,
-      ducks, knocks, spearHits, bossesDriven, bossesSurvived
+      ducks, knocks, dodges, spearHits, bossesDriven, bossesSurvived
   powerups = { windRider = left, magnet = left, goldRush = left, stampede = left }
   shield (bool), safeLeft (seconds of no-hit after a shield break or landing)
   runner = { lane, x, z, state, flying }   state: run | jump | duck | fly | crash
@@ -25,7 +31,9 @@ Fields:
       state = "fight" | "driven" | "survived", endedAt }
   entities = array of { id, role, lane, x, y, z, arrive, magnet, smashed, knocked, thrown }
       role: low | high | block | wall | charger | coin | gem | alliance | spear |
-            windRider | magnet | shield | goldRush | stampede
+            windRider | magnet | shield | goldRush | stampede | tauren
+      tauren: orc runs only, a Tauren coming up from behind (y below 0) and
+            on past you; arrive is when it draws level
       alliance: an Alliance jogger in a lane, jogging away from you; knocked
             (and worth points) when you run into it, never a hazard
       thrown: a hazard the boss throws, with phase "waiting" (in its hand),
@@ -36,7 +44,7 @@ Fields:
 Events ({ type = ..., ... }):
   collect {role, points}, powerup {role}, expire {role}, zone {index, key, fromSpeed},
   cleared {role, move, points} (jumped a low obstacle or ducked a high bar in your path),
-  knock {points} (ran into an Alliance jogger),
+  knock {points} (ran into an Alliance jogger), dodge {points} (a Tauren got past),
   bossStart {name, needed, limit}, spear {hits, needed, points},
   bossEnd {result = "driven" | "survived", name, points},
   crash {role}, shieldBreak {role}, smash {role}, jump, duck, land, lane
@@ -83,7 +91,7 @@ function World.New(seed, tuning, options)
 	self.stampedeBlend = 0
 
 	self.score, self.tokenPoints, self.timePoints = 0, 0, 0
-	self.movePoints, self.jumps, self.ducks, self.knocks = 0, 0, 0, 0
+	self.movePoints, self.jumps, self.ducks, self.knocks, self.dodges = 0, 0, 0, 0, 0
 	self.bossPoints, self.spearHits, self.bossesDriven, self.bossesSurvived = 0, 0, 0, 0
 	self.tokens, self.gems = 0, 0
 	self.powerups = {}
@@ -100,11 +108,42 @@ function World.New(seed, tuning, options)
 	self.skyLane = 2
 	self.over = false
 
-	if options.bosses ~= false and tuning.boss then
+	if options.mode == "orc" then
+		self.mode = "orc"
+		self.speed = Rules.OrcSpeed(tuning)
+		self.taurenSpeed = Rules.TaurenSpeed(tuning, 0)
+		self.cursor = tuning.orcRun.firstRow
+		self.coinNext = 1.5
+		-- Where you could be after the last row of Tauren (see SpawnTaurenRow).
+		self.rowStates = Patterns.StartStates()
+	elseif options.bosses ~= false and tuning.boss then
 		local first = tuning.boss.first
 		self.bossZone = self:FindBossZone(self.rng:Int(first[1], first[2]))
 	end
 	return self
+end
+
+-- Speed shown at a zone-clock time: yours, or in an orc run the Tauren's.
+function World:SpeedAt(course)
+	if self.mode == "orc" then
+		return Rules.TaurenSpeed(self.tuning, course)
+	end
+	return Rules.Speed(self.tuning, course)
+end
+
+-- How fast you close on an entity of this role, in yards a second. Negative
+-- for a Tauren in an orc run: it closes on you from behind.
+function World:Closing(role)
+	local tuning = self.tuning
+	if role == "charger" then
+		return self.speed + tuning.chargerSpeed
+	elseif role == "alliance" then
+		-- Jogging away from you, so you close on them more slowly.
+		return self.speed * (1 - tuning.alliance.speedShare)
+	elseif role == "tauren" then
+		return self.speed - (self.taurenSpeed or self.speed)
+	end
+	return self.speed
 end
 
 function World:Emit(event)
@@ -324,7 +363,7 @@ function World:AddEntity(role, lane, arrive, z)
 		x = self.tuning.lanes[lane],
 		z = z or 0,
 		arrive = arrive,
-		y = (arrive - self.time) * self.speed,
+		y = (arrive - self.time) * self:Closing(role),
 	}
 	self.entities[#self.entities + 1] = entity
 	return entity
@@ -573,6 +612,111 @@ function World:SpawnSkyTokens()
 	end
 end
 
+-- Orc runs ----------------------------------------------------------------------
+
+-- Seconds either side of drawing level that a Tauren overlaps you, at the
+-- speed it's closing now. It only closes faster later, so this is the most
+-- it can be.
+function World:TaurenWindow()
+	local reach = Rules.SHAPES.tauren.halfDepth + self.tuning.runnerHalfDepth
+	return reach / (self.taurenSpeed - self.speed)
+end
+
+-- A row of Tauren drawing level at self.cursor: one, or from pairFrom
+-- sometimes two, never all three lanes. Each is checked with Feasible over
+-- the whole time it overlaps you, carrying on from the rows before, so a lane
+-- can always be reached in time.
+function World:SpawnTaurenRow()
+	local tuning = self.tuning
+	local orc = tuning.orcRun
+	local at = self.cursor
+	local zone = Rules.ZoneIndex(tuning, at - self.paused)
+	local window = self:TaurenWindow()
+	local pairChance = 0
+	if zone >= orc.pairFrom then
+		pairChance = math.min(orc.pairMax, orc.pairChance + orc.pairPerZone * (zone - orc.pairFrom))
+	end
+	local lanes = self.rng:Shuffle({ 1, 2, 3 })
+	local candidates = {}
+	if self.rng:Next() < pairChance then
+		for first = 1, 3 do
+			candidates[#candidates + 1] = { lanes[first], lanes[first % 3 + 1] }
+		end
+	end
+	for _, lane in ipairs(lanes) do
+		candidates[#candidates + 1] = { lane }
+	end
+	for _, row in ipairs(candidates) do
+		local items = {}
+		for _, lane in ipairs(row) do
+			for _, t in ipairs({ at - window, at, at + window }) do
+				items[#items + 1] = { t = t, lane = lane, code = "T" }
+			end
+		end
+		table.sort(items, function(a, b)
+			return a.t < b.t
+		end)
+		local ok, states = Patterns.Feasible(items, tuning, self.rowStates)
+		if ok then
+			self.rowStates = states
+			for _, lane in ipairs(row) do
+				self:AddEntity("tauren", lane, at, 0)
+			end
+			for _, item in ipairs(items) do
+				self:Record(item.t, item.lane, "T")
+			end
+			break
+		end
+	end
+	-- Long enough apart that one row is past before the next can catch you
+	-- changing lanes.
+	self.cursor = at + math.max(Rules.RowGap(tuning, zone), 2 * window + 0.6)
+end
+
+-- A short line of coins coming from ahead in a random lane, sometimes ending
+-- in a gem. It may well lie in a Tauren's path.
+function World:SpawnCoinLine()
+	local orc = self.tuning.orcRun
+	local lane = self.rng:Int(1, #self.tuning.lanes)
+	local arrive = self.coinNext
+	for index = 1, orc.coinCount do
+		local at = arrive + (index - 1) * orc.coinSpacing
+		local role = "coin"
+		if index == orc.coinCount and self.rng:Next() < orc.gemChance then
+			role = "gem"
+		end
+		self:AddEntity(role, lane, at, GROUND_TOKEN_Z)
+		self:Record(at, lane, role == "gem" and "g" or "c")
+	end
+	local gap = orc.coinGap
+	self.coinNext = arrive + (orc.coinCount - 1) * orc.coinSpacing + gap[1] + self.rng:Next() * (gap[2] - gap[1])
+end
+
+-- Tauren appear spawnBehind yards back; coins as far ahead as any chunk.
+function World:SpawnOrcRun()
+	local tuning = self.tuning
+	while self.cursor - self.time <= tuning.orcRun.spawnBehind / (self.taurenSpeed - self.speed) do
+		self:SpawnTaurenRow()
+	end
+	while self.coinNext - self.time <= tuning.spawnAhead / self.speed do
+		self:SpawnCoinLine()
+	end
+end
+
+-- A Tauren fully past you without trampling you is a dodge, paid once.
+function World:CheckDodge(entity)
+	if entity.dodged or self.over then
+		return
+	end
+	if entity.y >= Rules.SHAPES.tauren.halfDepth + self.tuning.runnerHalfDepth then
+		entity.dodged = true
+		local points = self.tuning.points.dodge or 0
+		self.dodges = self.dodges + 1
+		self.movePoints = self.movePoints + points
+		self:Emit({ type = "dodge", points = points })
+	end
+end
+
 -- Simulation -----------------------------------------------------------------
 
 function World:ApplyPowerup(role)
@@ -612,7 +756,7 @@ function World:UpdateZone()
 	local tuning = self.tuning
 	local index = Rules.ZoneIndex(tuning, self.course)
 	if index ~= self.zoneIndex then
-		local fromSpeed = self.baseSpeed
+		local fromSpeed = self.taurenSpeed or self.baseSpeed
 		self.zoneIndex = index
 		self.zoneKey = self:ZoneKey(index)
 		self.zoneStart = (index - 1) * tuning.zoneLength
@@ -623,6 +767,11 @@ end
 function World:UpdateSpeed(h)
 	local tuning = self.tuning
 	self.baseSpeed = Rules.Speed(tuning, self.course)
+	if self.mode == "orc" then
+		self.taurenSpeed = Rules.TaurenSpeed(tuning, self.course)
+		self.speed = Rules.OrcSpeed(tuning)
+		return
+	end
 	local target = self.powerups.stampede and 1 or 0
 	local rate = h / tuning.stampedeRamp
 	if self.stampedeBlend < target then
@@ -740,9 +889,13 @@ function World:Tick(h)
 	self.distance = self.distance + self.speed * h
 	self.timePoints = self.timePoints + Rules.TimeRate(tuning, self.zoneIndex) * h
 
-	while self.cursor - self.time <= tuning.spawnAhead / self.speed do
-		if not self:SpawnChunk() then
-			break
+	if self.mode == "orc" then
+		self:SpawnOrcRun()
+	else
+		while self.cursor - self.time <= tuning.spawnAhead / self.speed do
+			if not self:SpawnChunk() then
+				break
+			end
 		end
 	end
 	if self.powerups.windRider then
@@ -757,20 +910,17 @@ function World:Tick(h)
 	local height = runner:Height()
 	local magnet = self.powerups.magnet
 	local pull = math.min(1, tuning.magnetPull * h)
+	-- In an orc run the road behind you is in view, so things go further back
+	-- before they're dropped, and Tauren go once they're well ahead.
+	local orc = self.mode == "orc" and tuning.orcRun
+	local behind = orc and orc.despawnBehind or tuning.despawnBehind
 	-- Compacted in place: kept entities slide down, so nothing is allocated per step.
 	local entities = self.entities
 	local count = #entities
 	local kept = 0
 	for index = 1, count do
 		local entity = entities[index]
-		local closing = self.speed
-		if entity.role == "charger" then
-			closing = closing + tuning.chargerSpeed
-		elseif entity.role == "alliance" then
-			-- Jogging away from you, so you close on them more slowly.
-			closing = closing * (1 - tuning.alliance.speedShare)
-		end
-		entity.y = (entity.arrive - self.time) * closing
+		entity.y = (entity.arrive - self.time) * self:Closing(entity.role)
 		if entity.thrown and entity.phase ~= "landed" then
 			-- Once thrown it stays thrown, and once down it stays down, even if
 			-- the speed (and so where throws leave and land) changes.
@@ -781,13 +931,17 @@ function World:Tick(h)
 		end
 
 		local keep = true
-		if entity.y < tuning.despawnBehind then
+		if entity.y < behind or (orc and entity.role == "tauren" and entity.y > orc.despawnAhead) then
 			keep = false
 		elseif Rules.OBSTACLE[entity.role] then
 			if not self.over and Rules.HitsObstacle(tuning, entity.role, entity.x, entity.y, runner.x, runner.z, height) then
 				self:HitObstacle(entity)
 			end
-			self:CheckMove(entity, runner)
+			if entity.role == "tauren" then
+				self:CheckDodge(entity)
+			else
+				self:CheckMove(entity, runner)
+			end
 		elseif entity.role == "alliance" then
 			if not self.over and not entity.knocked and Rules.Touches(entity.x, entity.y, entity.z, runner.x, runner.z, height) then
 				self:Knock(entity)
@@ -817,5 +971,5 @@ function World:Tick(h)
 	if not self.over or self.bossBeaten then
 		self:UpdateBoss()
 	end
-	self.score = Rules.Score(self.tokenPoints, self.timePoints, self.movePoints, self.bossPoints)
+	self.score = Rules.Score(self.tokenPoints, self.timePoints, self.movePoints, self.bossPoints, tuning.scoreMultiplier)
 end

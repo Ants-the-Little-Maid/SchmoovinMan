@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.11.0 (2026-11-09)
+
+- Options: a settings screen in the game window, opened from the start and pause screens, the minimap menu or `/schmoove options`. It covers sound, ducking, zone length, starting speed, window size and the resume countdown. Opening it mid-run pauses the run.
+- Starting speed: start slow (8 yd/s, score x0.75), normal (11) or fast (14, score x1.25). Choose it on the start screen, in Options, in the minimap menu or with `/schmoove speed 8`, `11` or `14`. The game-over total shows the multiplier.
+- Easier to see: swap any hazard, charger, coin or gem that's hard to see in a zone for another, in Options, with a turning preview. Brighter extras include powder kegs, a barricade, red and blue jewels and a large gold pile. "Reset to Default" puts a zone's usual models back.
+- Resuming a paused run counts down 3, 2, 1 first, so nothing hits you straight away. It can be turned off in Options.
+- A new run's camera starts in place, instead of drifting down from the last run's Wind Rider flight.
+- Fixed the camera staying in its boss-fight view, with the fog drawn back, for the rest of a run if a boss's model couldn't load.
+
 ## 0.10.0 (2026-11-08)
 
 - Bosses: every few zones a boss blocks the road and throws hazards into your lanes, with a red mark where each will land. Grab the spears that turn up to throw them at it: enough hits drive it off for +500 (and +50 a spear), or survive 25 seconds until it gives up for +150. The first comes in zone 3 to 6 and the next 3 to 6 zones after each fight. Spears needed start at 3 and rise by one every 2 zones. The zone clock stops while a boss is out.

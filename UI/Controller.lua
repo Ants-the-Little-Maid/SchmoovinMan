@@ -5,9 +5,10 @@ local _, ns = ...
 local Controller = {}
 ns.Controller = Controller
 
-local Rules = ns.Rules
 local FIRST_ZONE = ns.World.DEFAULT_ZONES[1]
 local OVER_DELAY = 1.4
+-- Seconds of 3, 2, 1 before a paused run goes on (when the setting is on).
+local COUNTDOWN = 3
 
 Controller.state = "closed"
 
@@ -32,7 +33,13 @@ function Controller:Build()
 	self.bubble = ns.Bubble.Create(frame.hudLayer)
 	-- A second bubble, for a Tauren jogger's reply.
 	self.replyBubble = ns.Bubble.Create(frame.hudLayer)
+	-- Orc runs: Tauren yell as they pass, several on screen at once.
+	self.taurenBubbles = {}
+	for index = 1, 3 do
+		self.taurenBubbles[index] = ns.Bubble.Create(frame.hudLayer)
+	end
 	self.screens = ns.Screens.Create(frame.screenLayer, self)
+	self.options = ns.Options.Create(frame.screenLayer, self)
 
 	-- Keyboard: only keys the game uses are kept from the rest of WoW.
 	local keys = CreateFrame("Frame", nil, frame)
@@ -111,6 +118,24 @@ function Controller:QuickStart()
 	self:StartRun()
 end
 
+-- Opens the Options screen, over the start or pause screen. A live run
+-- pauses first.
+function Controller:OpenOptions()
+	self:Build()
+	if not self.frame:IsShown() then
+		self.frame:Show()
+	end
+	if self.state == "running" and not self.overAt then
+		self:Pause("")
+	end
+	self.options:Show()
+end
+
+-- Options closed: the start screen shows any settings changed there.
+function Controller:OnOptionsClosed()
+	self:RefreshStart()
+end
+
 -- Redraws the start screen after a setting changes, if it's showing.
 function Controller:RefreshStart()
 	if self.screens and self.state == "start" then
@@ -134,6 +159,7 @@ function Controller:OnWindowShown()
 end
 
 function Controller:OnWindowHidden()
+	self.options:Hide()
 	if self.state == "running" then
 		self:Pause("Paused while the window was closed.")
 	end
@@ -158,10 +184,11 @@ function Controller:ShowStart()
 	self.screens:ShowStart(ns.Scores.Best(), guildTop)
 end
 
-function Controller:PrepareScene(zoneKey)
+-- mode: nil, or "orc" for an orc run.
+function Controller:PrepareScene(zoneKey, mode)
 	local zone = ns.ZonesByKey[zoneKey]
 	self.zoneKey = zoneKey
-	self.renderer:Reset()
+	self.renderer:Reset(mode)
 	self.renderer:SetZone(zone)
 	if not self.scene.calibrated then
 		self.scene:Calibrate()
@@ -182,19 +209,43 @@ local function RunTuning()
 	return copy
 end
 
+-- This character's orc-run role (see Data/OrcRun.lua): "target" or nil.
+-- Worked out once the character's name is known, then kept.
+function Controller:OrcRole()
+	if self.orcRole == nil then
+		local fullName, firstName = ns.PlayerName()
+		if not fullName or fullName == "" or fullName == UNKNOWNOBJECT then
+			return nil
+		end
+		self.orcRole = ns.OrcRun.RoleFor(fullName, firstName) or false
+	end
+	return self.orcRole or nil
+end
+
 function Controller:StartRun()
 	if InCombatLockdown() then
 		ns.Print("You can't start a run in combat.")
 		return
 	end
-	self.world = ns.World.New(math.floor(GetTime() * 1000) % 2147483646 + 1, RunTuning())
-	self:PrepareScene(self.world.zoneKey)
+	-- A run never goes on under Options, where the keys don't reach it.
+	self.options:Hide()
+	-- Now and then, for the right names (or when forced), an orc run.
+	local mode = ns.OrcRun.Roll(self:OrcRole(), ns.OrcRun.forced, math.random())
+	self.world = ns.World.New(math.floor(GetTime() * 1000) % 2147483646 + 1, RunTuning(), { mode = mode })
+	self:PrepareScene(self.world.zoneKey, mode)
 	self.screens:HideAll()
-	self.hud:SetHint(self.world.tuning.duckEnabled)
+	self.hud:SetHint(self.world.tuning.duckEnabled, mode)
 	self.hud:SetShown(true)
-	self.hud:ShowBanner(ns.ZonesByKey[self.world.zoneKey].name, nil, nil, GetTime())
+	if mode == "orc" then
+		self.hud:ShowMessage("boss", "ORC RUN", "You're an orc!", "Schmoovers coming through: dodge them", GetTime())
+	else
+		self.hud:ShowBanner(ns.ZonesByKey[self.world.zoneKey].name, nil, nil, GetTime())
+	end
 	self.overAt = nil
+	self:StopCountdown()
 	self.nextQuip = 0
+	self.nextComplaint = 0
+	self.lastPassSide = nil
 	self:HideBubbles()
 	self.state = "running"
 	self.held = {}
@@ -205,6 +256,7 @@ function Controller:Pause(reason)
 	if self.state ~= "running" then
 		return
 	end
+	self:StopCountdown()
 	self.state = "paused"
 	self.screens:ShowPaused(self.world, reason)
 end
@@ -218,8 +270,36 @@ function Controller:Resume()
 		return
 	end
 	self.screens.paused:Hide()
+	-- The title bar's Resume can be clicked with Options open: close it, as
+	-- the keys wouldn't reach the run under it.
+	self.options:Hide()
 	self.state = "running"
 	self.held = {}
+	-- A countdown first, so nothing hits you the moment the run goes on.
+	if ns.db.settings.countdown ~= false then
+		self.countdownUntil = GetTime() + COUNTDOWN
+	end
+end
+
+-- The resume countdown, if one is on: true while it's still counting.
+function Controller:UpdateCountdown(now)
+	if not self.countdownUntil then
+		return false
+	end
+	local left = self.countdownUntil - now
+	if left > 0 then
+		self.hud:ShowCountdown(math.ceil(left))
+		return true
+	end
+	self:StopCountdown()
+	return false
+end
+
+function Controller:StopCountdown()
+	self.countdownUntil = nil
+	if self.hud then
+		self.hud:ShowCountdown(nil)
+	end
 end
 
 -- The title bar's pause button works only during a run, so it's greyed out
@@ -311,7 +391,8 @@ function Controller:HandleEvents(now)
 			local zone = ns.ZonesByKey[event.key]
 			self.zoneKey = event.key
 			self.renderer:SetZone(zone)
-			local toSpeed = Rules.Speed(world.tuning, world.course + world.tuning.bumpTime)
+			-- In an orc run, the Tauren's speed.
+			local toSpeed = world:SpeedAt(world.course + world.tuning.bumpTime)
 			self.hud:ShowBanner(zone.name, event.fromSpeed, toSpeed, now)
 			self.flashAt = now
 			self.frame.flash:SetColorTexture(zone.fog.color[1], zone.fog.color[2], zone.fog.color[3], 1)
@@ -327,7 +408,8 @@ function Controller:OnUpdate(elapsed)
 	if not world then
 		return
 	end
-	if self.state == "running" then
+	-- Nothing moves while the resume countdown runs.
+	if self.state == "running" and not self:UpdateCountdown(now) then
 		world:Step(elapsed)
 		self:HandleEvents(now)
 		if self.overAt and now - self.overAt > OVER_DELAY then
@@ -378,6 +460,67 @@ function Controller:HideBubbles()
 	self.bubble:Hide()
 	self.replyBubble:Hide()
 	self.pendingReply = nil
+	for _, bubble in ipairs(self.taurenBubbles) do
+		bubble:Hide()
+	end
+	self.pendingComplaint = nil
+end
+
+-- Orc runs: each Tauren yells as it passes, over its own head, if a bubble is
+-- free: half the time the side it's passing on ("... Again" when the last
+-- side line was on the same side), otherwise a taurenToOrc line. Now and then
+-- the orc answers over its own head, panting and complaining.
+function Controller:UpdateOrcQuips(passes)
+	local world = self.world
+	local quips = ns.Assets.quips
+	local renderer = self.renderer
+	if self.state == "running" then
+		for _, pass in ipairs(passes) do
+			local free
+			for _, bubble in ipairs(self.taurenBubbles) do
+				if not bubble:IsShown() then
+					free = bubble
+					break
+				end
+			end
+			if free then
+				local line
+				-- A side line only for a Tauren passing in another lane.
+				if pass.side and math.random() < quips.sideChance then
+					local again = self.lastPassSide == pass.side
+					if pass.side < 0 then
+						line = again and quips.passLeftAgain or quips.passLeft
+					else
+						line = again and quips.passRightAgain or quips.passRight
+					end
+					self.lastPassSide = pass.side
+				else
+					line = quips.taurenToOrc[math.random(#quips.taurenToOrc)]
+				end
+				local tauren = pass.tauren
+				free:Say(line, world.time + quips.duration, function()
+					return renderer:EntityHeadPoint(tauren)
+				end)
+				if not self.pendingComplaint and world.time >= (self.nextComplaint or 0) then
+					self.pendingComplaint = world.time + quips.replyDelay
+				end
+			end
+		end
+	end
+
+	-- The orc's answer.
+	if self.pendingComplaint and world.time >= self.pendingComplaint then
+		self.pendingComplaint = nil
+		self.bubble:Say(quips.orcRun[math.random(#quips.orcRun)], world.time + quips.duration, function()
+			return renderer:RunnerHeadPoint(self.world)
+		end)
+		self.nextComplaint = world.time + quips.duration + quips.complaintGap
+	end
+
+	self.bubble:Update(world.time)
+	for _, bubble in ipairs(self.taurenBubbles) do
+		bubble:Update(world.time)
+	end
 end
 
 -- On overtaking a jogger something gets said, always by the runner first:
@@ -389,6 +532,10 @@ function Controller:UpdateQuips()
 	local passes = self.renderer:TakePasses()
 	if self.state ~= "running" and self.state ~= "paused" then
 		self:HideBubbles()
+		return
+	end
+	if world.mode == "orc" then
+		self:UpdateOrcQuips(passes)
 		return
 	end
 	local quips = ns.Assets.quips
@@ -440,11 +587,20 @@ end
 
 -- Returns true when the key was used, so it doesn't reach the game.
 function Controller:HandleKey(key)
+	-- Over the Options screen, Esc closes it and nothing else is used.
+	if self.options:IsShown() then
+		if key == "ESCAPE" then
+			self.options:Hide()
+			return true
+		end
+		return false
+	end
 	local state = self.state
 	if state == "running" then
 		local action = RUN_KEYS[key]
 		if action then
-			if not self.held[key] then
+			-- Kept from the game but not used during the resume countdown.
+			if not self.held[key] and not self.countdownUntil then
 				self.held[key] = true
 				if action ~= "duck" or self.world.tuning.duckEnabled then
 					self.world:Input(action)

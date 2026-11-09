@@ -29,6 +29,15 @@ local function BuildMenu(owner, root)
 		end)
 	end
 
+	local speeds = root:CreateButton("Starting speed")
+	for _, choice in ipairs(ns.Tuning.startSpeeds) do
+		speeds:CreateRadio(ns.StartSpeedText(choice), function()
+			return ns.Tuning.baseSpeed == choice.speed
+		end, function()
+			ns.ChooseStartSpeed(choice.speed)
+		end)
+	end
+
 	local sizes = root:CreateButton("Window size")
 	for _, size in ipairs(ns.Window.SIZES) do
 		sizes:CreateRadio(size.name, function()
@@ -48,6 +57,10 @@ local function BuildMenu(owner, root)
 		return settings.sound
 	end, function()
 		ns.SetSound(not settings.sound)
+	end)
+	root:CreateDivider()
+	root:CreateButton("Options...", function()
+		controller:OpenOptions()
 	end)
 end
 

@@ -31,6 +31,22 @@ function Rules.Speed(tuning, time)
 	return math.min(speed, tuning.maxSpeed)
 end
 
+-- Orc runs: the orc stays at the zone-1 speed, and the Tauren run taurenLead
+-- faster than the normal curve.
+function Rules.OrcSpeed(tuning)
+	return Rules.Speed(tuning, 0)
+end
+
+function Rules.TaurenSpeed(tuning, time)
+	return Rules.Speed(tuning, time) + tuning.orcRun.taurenLead
+end
+
+-- Orc runs: seconds between rows of Tauren in a zone.
+function Rules.RowGap(tuning, zone)
+	local orc = tuning.orcRun
+	return math.max(orc.rowGapMin, orc.rowGapStart - orc.rowGapPerZone * (zone - 1))
+end
+
 -- Row spacing multiplier for chunks: 1 at the start, smaller later.
 function Rules.Tempo(tuning, zone)
 	return math.max(tuning.tempoMin, tuning.tempoStart - tuning.tempoPerZone * (zone - 1))
@@ -61,14 +77,17 @@ Rules.SHAPES = {
 	block = { halfWidth = 0.85, halfDepth = 0.8, bottom = 0, top = 4.0 },
 	wall = { halfWidth = 0.95, halfDepth = 0.6, bottom = 0, top = 4.0 },
 	charger = { halfWidth = 0.85, halfDepth = 1.2, bottom = 0, top = 3.0 },
+	-- Orc runs: a Tauren coming up from behind. Too tall to jump, nothing to
+	-- duck under: only a lane change gets out of its way.
+	tauren = { halfWidth = 0.8, halfDepth = 0.6, bottom = 0, top = 3.0 },
 }
 
-Rules.OBSTACLE = { low = true, high = true, block = true, wall = true, charger = true }
+Rules.OBSTACLE = { low = true, high = true, block = true, wall = true, charger = true, tauren = true }
 Rules.TOKEN = { coin = true, gem = true }
 Rules.POWERUP = { windRider = true, magnet = true, shield = true, goldRush = true, stampede = true }
 
 -- What the runner must do to survive an obstacle in its lane.
-Rules.REQUIREMENT = { low = "jump", high = "duck", block = "avoid", wall = "avoid", charger = "avoid" }
+Rules.REQUIREMENT = { low = "jump", high = "duck", block = "avoid", wall = "avoid", charger = "avoid", tauren = "avoid" }
 
 -- True when the runner (at x, feet at z, standing height) touches the obstacle
 -- at lateral position ex and distance ey.
@@ -94,8 +113,9 @@ function Rules.Touches(ex, ey, ez, runnerX, runnerZ, runnerHeight)
 	return ez > runnerZ - 0.6 and ez < runnerZ + runnerHeight + 0.6
 end
 
-function Rules.Score(tokenPoints, timePoints, movePoints, bossPoints)
-	return math.floor(tokenPoints + timePoints + (movePoints or 0) + (bossPoints or 0))
+-- multiplier: the starting speed's (Tuning.startSpeeds), 1 when left out.
+function Rules.Score(tokenPoints, timePoints, movePoints, bossPoints, multiplier)
+	return math.floor((tokenPoints + timePoints + (movePoints or 0) + (bossPoints or 0)) * (multiplier or 1))
 end
 
 -- Spears it takes to drive off a boss met in this zone.

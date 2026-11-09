@@ -6,6 +6,7 @@ Screens.__index = Screens
 ns.Screens = Screens
 
 local UI = ns.UI
+local BUTTON_FONT = "Fonts\\FRIZQT__.TTF"
 
 local CHARGER_NAMES = {
 	mulgore = "a kodo",
@@ -23,7 +24,13 @@ local CRASH_TEXT = {
 	high = "Clotheslined by a high bar",
 	block = "Ran into a block",
 	wall = "Ran into a wall",
+	tauren = "Trampled by a Schmoover",
 }
+
+-- Orc runs are marked with a candle, inline before the text.
+local function Candle(text)
+	return "|T" .. ns.Assets.icons.candle[1] .. ":16:16|t " .. text
+end
 
 local function Overlay(parent, alpha)
 	local frame = CreateFrame("Frame", nil, parent)
@@ -79,10 +86,11 @@ function Screens:BuildStart(layer)
 		self.controller:StartRun()
 	end)
 
-	-- Zone length: click to cycle through the choices.
-	local zoneButton = UI.Button(start, "", nil, 230, 30)
+	-- Zone length and starting speed, stacked beside Start: click to cycle
+	-- through the choices.
+	local zoneButton = UI.Button(start, "", nil, 250, 22)
 	zoneButton.text:SetFont("Fonts\\FRIZQT__.TTF", 12, "")
-	zoneButton:SetPoint("LEFT", button, "RIGHT", 12, 0)
+	zoneButton:SetPoint("TOPLEFT", button, "TOPRIGHT", 12, 0)
 	zoneButton:SetScript("OnClick", function()
 		ns.CycleZoneLength()
 		self:UpdateZoneButton()
@@ -99,9 +107,37 @@ function Screens:BuildStart(layer)
 	end)
 	self.zoneButton = zoneButton
 
+	-- Wide enough for "Start: 14 yd/s (Fast, score x1.25)".
+	local speedButton = UI.Button(start, "", nil, 250, 22)
+	speedButton.text:SetFont(BUTTON_FONT, 12, "")
+	speedButton:SetPoint("BOTTOMLEFT", button, "BOTTOMRIGHT", 12, 0)
+	speedButton:SetScript("OnClick", function()
+		ns.CycleStartSpeed()
+		self:UpdateZoneButton()
+		ns.PlaySound("click")
+	end)
+	speedButton:SetScript("OnEnter", function(widget)
+		GameTooltip:SetOwner(widget, "ANCHOR_BOTTOM")
+		GameTooltip:SetText("Starting speed")
+		GameTooltip:AddLine("How fast a run starts. Slow gives more time to react and scores x0.75; Fast scores x1.25.", 1, 1, 1, true)
+		GameTooltip:Show()
+	end)
+	speedButton:SetScript("OnLeave", function()
+		GameTooltip:Hide()
+	end)
+	self.speedButton = speedButton
+
 	self.startInfo = UI.Text(start, 12, C.subText)
 	self.startInfo:SetPoint("TOPLEFT", button, "BOTTOMLEFT", 0, -10)
 	self.startInfo:SetJustifyH("LEFT")
+
+	local options = UI.Button(start, "Options", nil, 120, 26)
+	options.text:SetFont(BUTTON_FONT, 12, "")
+	options:SetPoint("TOPLEFT", self.startInfo, "BOTTOMLEFT", 0, -10)
+	options:SetScript("OnClick", function()
+		self.controller:OpenOptions()
+	end)
+	self.optionsButton = options
 
 	-- Controls and power-ups on the right.
 	local controls = UI.Dialog(start)
@@ -166,6 +202,7 @@ function Screens:UpdateZoneButton()
 		end
 	end
 	self.zoneButton.text:SetText(("Zones: %d s (%s)"):format(seconds, name))
+	self.speedButton.text:SetText("Start: " .. ns.StartSpeedText())
 end
 
 function Screens:ShowStart(best, guildBest)
@@ -214,6 +251,13 @@ function Screens:BuildPaused(layer)
 		value:SetPoint("TOP", label, "BOTTOM", 0, -3)
 		self.pauseStats[index] = value
 	end
+
+	local options = UI.Button(box, "Options", nil, 90, 24)
+	options.text:SetFont(BUTTON_FONT, 12, "")
+	options:SetPoint("TOPRIGHT", -14, -14)
+	options:SetScript("OnClick", function()
+		self.controller:OpenOptions()
+	end)
 
 	local resume = UI.Button(box, "Resume (P)", "primary", 328, 44)
 	resume:SetPoint("TOP", 0, -150)
@@ -287,6 +331,7 @@ function Screens:BuildGameOver(layer)
 	self.bossValue:SetPoint("TOPRIGHT", -22, -210)
 	local totalLabel
 	totalLabel, self.totalValue = Row(results, "Total", "", 20)
+	self.totalLabel = totalLabel
 	totalLabel:SetTextColor(UI.Hex(C.gold))
 	self.totalValue:SetTextColor(UI.Hex(C.gold))
 	totalLabel:SetPoint("TOPLEFT", 22, -238)
@@ -406,7 +451,9 @@ function Screens:ShowBoard(tab)
 		local entry = entries[index]
 		if entry then
 			row.cells[1]:SetText(index)
-			row.cells[2]:SetText(entry.name or entry.character or "?")
+			local name = entry.name or entry.character or "?"
+			-- Your own orc runs carry a candle (guild messages don't say).
+			row.cells[2]:SetText(entry.orc and Candle(name) or name)
 			row.cells[3]:SetText(UI.FormatTime((entry.tenths or 0) / 10))
 			row.cells[4]:SetText(UI.FormatNumber(entry.tokens or 0))
 			row.cells[5]:SetText(UI.FormatNumber(entry.score or 0))
@@ -451,9 +498,27 @@ function Screens:ShowGameOver(world, entry, personalRank, guildRank, isBest)
 	local gemText = world.gems > 0 and string.format(" (%d gem%s)", world.gems, world.gems == 1 and "" or "s") or ""
 	self.tokenLabel:SetText(string.format("Tokens %s%s", UI.FormatNumber(world.tokens), gemText))
 	self.tokenValue:SetText(UI.FormatNumber(world.tokenPoints))
-	self.moveLabel:SetText(string.format("Jumps %d, ducks %d, knocks %d", world.jumps or 0, world.ducks or 0, world.knocks or 0))
+	-- A slow or fast start multiplies the total.
+	local total = "Total"
+	local multiplier = world.tuning.scoreMultiplier or 1
+	if multiplier ~= 1 then
+		for _, choice in ipairs(ns.Tuning.startSpeeds) do
+			if choice.speed == world.tuning.baseSpeed then
+				total = ("Total (%s start x%s)"):format(choice.name, tostring(multiplier))
+			end
+		end
+	end
+	if world.mode == "orc" then
+		-- An orc run: Tauren dodged instead of moves, and no bosses.
+		self.moveLabel:SetText(string.format("Tauren dodged %d", world.dodges or 0))
+		self.bossLabel:SetText("Orc run: no bosses")
+		self.totalLabel:SetText(Candle(total))
+	else
+		self.moveLabel:SetText(string.format("Jumps %d, ducks %d, knocks %d", world.jumps or 0, world.ducks or 0, world.knocks or 0))
+		self.bossLabel:SetText(string.format("Bosses: %d driven off, %d outlasted (%d spear%s)", world.bossesDriven or 0, world.bossesSurvived or 0, world.spearHits or 0, world.spearHits == 1 and "" or "s"))
+		self.totalLabel:SetText(total)
+	end
 	self.moveValue:SetText(UI.FormatNumber(world.movePoints or 0))
-	self.bossLabel:SetText(string.format("Bosses: %d driven off, %d outlasted (%d spear%s)", world.bossesDriven or 0, world.bossesSurvived or 0, world.spearHits or 0, world.spearHits == 1 and "" or "s"))
 	self.bossValue:SetText(UI.FormatNumber(world.bossPoints or 0))
 	self.totalValue:SetText(UI.FormatNumber(world.score))
 

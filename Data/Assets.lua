@@ -26,6 +26,22 @@ ns.Assets = {
 		{ fileID = 122055 }, -- character/tauren/male/taurenmale.m2
 	},
 	runnerHeight = 2.6,
+	-- Orc runs (Data/OrcRun.lua): the runner is an orc, the Orgrimmar Grunt
+	-- appearances the orc joggers use.
+	orcRunner = {
+		{ displayID = 4259 },
+		{ displayID = 4032 },
+		{ displayID = 3743 },
+	},
+	-- Orc runs for a player whose own character is an orc: their own look
+	-- (hair, colour, face), undressed and put in the orc warlock's starting
+	-- clothes, head bare. Item IDs per slot, tried in order: the Classic
+	-- robe, then the later orc and human ones. (Warcraft Wiki, 2026-11-09.)
+	orcPlayerDress = {
+		{ 6129, 52543, 57 }, -- Acolyte's Robe
+		{ 1396, 52679 }, -- Acolyte's Pants
+		{ 59 }, -- Acolyte's Shoes
+	},
 
 	-- Joggers beside the road: generic Horde NPC appearances, body types 1 and 2.
 	-- Skyborne was asked for but isn't in the game data, so female Tauren stand in.
@@ -180,6 +196,30 @@ ns.Assets = {
 			"Too schmoove for you!",
 			"Giving up already?",
 		},
+		-- Orc runs: what a Tauren yells as it passes the orc. Half the time the
+		-- side it passes on, then "... Again" if the last side line was on the
+		-- same side; otherwise a taurenToOrc line. The orc answers with an
+		-- orcRun line (pants and complaints), now and then.
+		passLeftAgain = "On your left... Again",
+		passRightAgain = "On your right... Again",
+		taurenToOrc = {
+			"Schmoove over candle man",
+			"Candles can't schmoove",
+			"I take that candle",
+		},
+		orcRun = {
+			"*pant* *pant*",
+			"Can't... keep... up...",
+			"How are you all so FAST?",
+			"Wait for me!",
+			"I'm schmoovin' as fast as I can!",
+			"SCHMOOVING AINT IN MY DNA",
+			"I can't schmoove! I can barely walk!",
+			"My legs... are on fire...",
+			"I wish... I could... Schmoo...veee",
+		},
+		-- Seconds after one of the orc's complaints before the next can come.
+		complaintGap = 2.5,
 		-- Seconds between the runner's compliment and the Tauren's reply.
 		replyDelay = 0.9,
 		-- Chance of a side line rather than a general one.
@@ -197,14 +237,16 @@ ns.Assets = {
 	windRiderLength = 5,
 
 	tokens = {
+		-- name: shown in the Options model picker. backupOnly: a copy that
+		-- looks the same, kept as a backup but not offered there.
 		coin = {
-			{ fileID = 200137, size = 0.75 }, -- world/generic/passivedoodads/treasurepiles/goldpilesmall01.m2
-			{ fileID = 953606, size = 0.75 }, -- goldpilesmall01_nocollide.m2
-			{ fileID = 916363, size = 0.75 }, -- spells/treasuregoblin_coinpile.m2
+			{ fileID = 200137, size = 0.75, name = "Gold pile" }, -- world/generic/passivedoodads/treasurepiles/goldpilesmall01.m2
+			{ fileID = 953606, size = 0.75, name = "Gold pile", backupOnly = true }, -- goldpilesmall01_nocollide.m2
+			{ fileID = 916363, size = 0.75, name = "Coin pile" }, -- spells/treasuregoblin_coinpile.m2
 		},
 		gem = {
-			{ fileID = 202443, size = 1.0 }, -- kalimdor/silithus/passivedoodads/crystals/floatingpurplecrystal01.m2
-			{ fileID = 202748, size = 1.0 }, -- kalimdor/ungoro/passivedoodads/crystals/ungorocrystal_blue01.m2
+			{ fileID = 202443, size = 1.0, name = "Purple crystal" }, -- kalimdor/silithus/passivedoodads/crystals/floatingpurplecrystal01.m2
+			{ fileID = 202748, size = 1.0, name = "Blue crystal (Magnet)" }, -- kalimdor/ungoro/passivedoodads/crystals/ungorocrystal_blue01.m2
 		},
 	},
 
@@ -264,6 +306,11 @@ ns.Assets = {
 		bossFlee = { 5 }, -- Run
 	},
 
+	-- Orc runs: the candle that marks their scores (the first is used).
+	icons = {
+		candle = { "Interface\\Icons\\INV_Misc_Candle_01", "Interface\\Icons\\INV_Misc_Candle_02", "Interface\\Icons\\INV_Misc_Candle_03" },
+	},
+
 	-- SOUNDKIT names; missing ones are skipped.
 	sounds = {
 		coin = "LOOT_WINDOW_COIN_SOUND",
@@ -282,3 +329,19 @@ ns.Assets = {
 		bossSurvived = "UI_WORLDQUEST_COMPLETE",
 	},
 }
+
+-- Orc runs for an orc player: their own character first (unit = a model
+-- copied from that unit, then put in `dress`), the generic orcs as backups.
+ns.Assets.orcPlayerRunner = { { unit = "player", dress = ns.Assets.orcPlayerDress } }
+for _, candidate in ipairs(ns.Assets.orcRunner) do
+	ns.Assets.orcPlayerRunner[#ns.Assets.orcPlayerRunner + 1] = candidate
+end
+
+-- Orc runs: the Tauren that stream past the orc are the generic Tauren
+-- joggers (both body types), each list with its backups.
+ns.Assets.stampede = {}
+for _, list in ipairs(ns.Assets.joggers) do
+	if list.race == "tauren" and not list.name then
+		ns.Assets.stampede[#ns.Assets.stampede + 1] = list
+	end
+end

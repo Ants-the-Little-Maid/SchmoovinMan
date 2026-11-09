@@ -39,6 +39,11 @@ local function Widget(kind)
 		SetModelByFileID = function() return true end,
 		SetModelByCreatureDisplayID = function() return true end,
 		AttachToMount = function() return true end,
+		-- Try-on results: Success (0), unless a test sets TryOnResult(link).
+		TryOn = function(self, link)
+			calls.TryOn = (calls.TryOn or 0) + 1
+			return TryOnResult and TryOnResult(link) or 0
+		end,
 		DetachFromMount = function() return true end,
 		GetCameraForward = function() return 0, 0.95, -0.3 end,
 		GetCameraPosition = function() return 0, -4, 4 end,
@@ -180,6 +185,10 @@ for _, record in ipairs(r.joggers) do
 	r:FreeRecord(record)
 end
 r.joggers, r.passes, r.joggerNext = {}, {}, 1e9
+-- And the road, with nothing new for a while, so no Alliance jogger is
+-- knocked over (with its own line) in the middle of an exchange.
+C.world.entities = {}
+C.world.cursor = C.world.time + 15
 local function JoggerOf(race)
 	for _, list in ipairs(ns.Assets.joggers) do
 		if list.race == race then
@@ -242,6 +251,19 @@ Frames(2)
 assert(C.world.knocks == knocksBefore + 1, "Alliance jogger wasn't knocked")
 assert(said[1] and knockLines[said[1]], "no knock line: " .. tostring(said[1]))
 print("knock: " .. said[1])
+-- Where the camera is (distance ahead of the runner, height), from the
+-- scene's look-at point, distance and tilt.
+local function CameraOf(scene)
+	return scene.targetY - scene.distance * math.cos(scene.pitch), scene.targetZ + scene.distance * math.sin(scene.pitch)
+end
+-- How far down the view (0 top, 1 bottom) a point shows. In the real client
+-- the view spans tan(fov / 2) / 2.086 either side of its centre (measured
+-- from a 0.10.0 screenshot).
+local function FromTopOf(scene, y, z)
+	local cy, cz = CameraOf(scene)
+	local angle = math.atan2(z - cz, y - cy) + scene.pitch
+	return 0.5 - 0.5 * math.tan(angle) / (math.tan(scene.fov / 2) / 2.086)
+end
 -- A boss fight, made due now in Westfall: banner, boss bar, the boss drawn,
 -- throws with landing marks, spears thrown at it, then the driven-off banner
 -- and the boss running off without coming back.
@@ -285,28 +307,24 @@ do
 		marks = math.max(marks, r.markers.count)
 	end
 	assert(marks > 0, "no landing marks for thrown hazards")
+	-- The camera has moved to the fight view.
+	local scene, fight = r.scene, ns.Renderer.FIGHT_CAMERA
+	assert(math.abs(scene.pitch - fight.pitch) < 1e-9 and math.abs(scene.fov - fight.fov) < 1e-9, "camera didn't move to the fight view")
+	local function Camera()
+		return CameraOf(scene)
+	end
 	-- The fog has drawn back, keeping its depth, so the boss isn't lost in it.
 	local fog = r.zone.fog
 	local depth = fog.far - fog.near
 	local fogNear, fogFar = rawget(sceneFrame, "fogNear") or fog.near, rawget(sceneFrame, "fogFar") or fog.far
-	local fightCamera = ns.Renderer.FIGHT_CAMERA
-	local cameraY = fightCamera.lookAhead - fightCamera.distance * math.cos(fightCamera.pitch)
-	local cameraZ = fightCamera.height + fightCamera.distance * math.sin(fightCamera.pitch)
+	local cameraY, cameraZ = Camera()
 	local into = (math.sqrt((ns.Tuning.boss.distance - cameraY) ^ 2 + cameraZ ^ 2) - fogNear) / depth
 	assert(fogNear > fog.near and math.abs(fogFar - fogNear - depth) < 1e-6, "fog didn't draw back for the boss")
 	assert(into <= 0.15 + 1e-6, ("boss still deep in the fog: %.2f of the way in"):format(into))
-	-- The camera has moved to the fight view. In the real client the view
-	-- spans tan(fov / 2) / 2.086 either side of its centre (measured from a
-	-- 0.10.0 screenshot), so check the framing with that: the tallest boss's
-	-- head under the boss bar (the top 9% of the view) and the runner's feet
-	-- still in view.
-	local scene, fight = r.scene, ns.Renderer.FIGHT_CAMERA
-	assert(math.abs(scene.pitch - fight.pitch) < 1e-9 and math.abs(scene.fov - fight.fov) < 1e-9, "camera didn't move to the fight view")
+	-- The framing: the tallest boss's head under the boss bar (the top 9% of
+	-- the view) and the runner's feet still in view.
 	local function FromTop(y, z)
-		local cy = scene.targetY - scene.distance * math.cos(scene.pitch)
-		local cz = scene.targetZ + scene.distance * math.sin(scene.pitch)
-		local angle = math.atan2(z - cz, y - cy) + scene.pitch
-		return 0.5 - 0.5 * math.tan(angle) / (math.tan(scene.fov / 2) / 2.086)
+		return FromTopOf(scene, y, z)
 	end
 	local tallest = 0
 	for _, zone in ipairs(ns.Zones) do
@@ -349,6 +367,23 @@ do
 	rawset(hud.bossCount, "SetText", nil)
 	assert(hud.zoneNext.value:find("next in"), "zone line still paused after the boss left: " .. tostring(hud.zoneNext.value))
 	rawset(hud.zoneNext, "SetText", nil)
+end
+-- A boss whose model never loads still leaves, and the camera goes back.
+do
+	local world = C.world
+	world.bossZone = world.zoneIndex
+	world.paused = world.paused - (world:BossStart() - world.time)
+	world.safeLeft = 1e9
+	Frames(0.2)
+	assert(world:InFight() and r.bossRecord, "second boss didn't turn up")
+	r.bossRecord.ready, r.bossRecord.failed = false, true
+	world:EndBoss("survived")
+	world.safeLeft = 1e9
+	Frames(2.6)
+	assert(not r.bossRecord, "a boss that never loaded is still held after leaving")
+	Frames(1.5)
+	assert(math.abs(r.scene.pitch - ns.Renderer.CAMERA.pitch) < 1e-9, "camera stuck in the fight view after an unloaded boss")
+	world.safeLeft = 1e9
 end
 -- High bars get posts.
 local high = C.world:AddEntity("high", 2, C.world.time + 3, 0)
@@ -602,5 +637,335 @@ C:StartRun()
 C.world.score = 1
 C:EndRun()
 assert(not C.screens.guildBadge.shown, "guild badge shown for a run that isn't this character's best")
+-- Starting speed, Options, model picks and the resume countdown ------------------
+do
+	-- /schmoove speed: the next run starts at that speed and scores with its
+	-- multiplier; the start screen says so.
+	C:ShowStart()
+	SlashCmdList.SCHMOOVINMAN("speed 8")
+	assert(ns.Tuning.baseSpeed == 8 and ns.Tuning.scoreMultiplier == 0.75 and ns.db.settings.startSpeed == 8, "/schmoove speed 8 didn't set a slow start")
+	rawset(C.screens.speedButton.text, "SetText", function(self, text) rawset(self, "value", text) end)
+	C.screens:UpdateZoneButton()
+	assert(C.screens.speedButton.text.value == "Start: 8 yd/s (Slow, score x0.75)", "start screen speed: " .. tostring(C.screens.speedButton.text.value))
+	C:StartRun()
+	local world = C.world
+	world.safeLeft = 1e9
+	Frames(2)
+	assert(math.abs(world.speed - (8 + ns.Tuning.rampPerSecond * world.time)) < 0.05, "slow run doesn't start at 8: " .. world.speed)
+	local raw = world.tokenPoints + world.timePoints + world.movePoints + world.bossPoints
+	assert(world.score == math.floor(raw * 0.75), "slow run's score isn't x0.75")
+	C.screens.speedButton.scripts.OnClick(C.screens.speedButton)
+	assert(ns.Tuning.baseSpeed == 11 and world.tuning.baseSpeed == 8, "speed button didn't cycle, or reached the live run")
+	SlashCmdList.SCHMOOVINMAN("speed 99")
+	assert(ns.Tuning.baseSpeed == 11 and ns.Tuning.scoreMultiplier == 1, "an unknown speed didn't fall back to Normal")
+
+	-- Resume countdown: nothing moves for 3 seconds, keys wait, then it goes on.
+	C:Pause("")
+	C:Resume()
+	local frozenAt = world.time
+	local hud = C.hud
+	rawset(hud.countdown, "SetText", function(self, text) rawset(self, "value", text) end)
+	Frames(0.5)
+	assert(world.time == frozenAt and hud.countdown.shown and hud.countdown.value == "3", "countdown not counting from 3: " .. tostring(hud.countdown.value))
+	local lane = world.runner.lane
+	C.keys.scripts.OnKeyDown(C.keys, lane == 1 and "D" or "A")
+	C.keys.scripts.OnKeyUp(C.keys, lane == 1 and "D" or "A")
+	assert(world.runner.lane == lane, "a lane key worked during the countdown")
+	Frames(2)
+	assert(world.time == frozenAt and hud.countdown.value == "1", "countdown didn't reach 1 with the run still held")
+	Frames(0.6)
+	assert(world.time > frozenAt and not hud.countdown.shown, "run didn't go on after the countdown")
+	-- Pausing during the countdown stops it; with it off, Resume goes straight on.
+	C:Pause("")
+	C:Resume()
+	Frames(0.2)
+	C.keys.scripts.OnKeyDown(C.keys, "P")
+	C.keys.scripts.OnKeyUp(C.keys, "P")
+	assert(C.state == "paused" and not hud.countdown.shown and not C.countdownUntil, "P during the countdown didn't pause")
+	ns.SetCountdown(false)
+	C:Resume()
+	local before = world.time
+	Frames(0.2)
+	assert(world.time > before, "with the countdown off, Resume didn't go straight on")
+	ns.SetCountdown(true)
+
+	-- Options: opening it mid-run pauses; each game row changes its setting.
+	local options = C.options
+	world.safeLeft = 1e9
+	C:OpenOptions()
+	assert(options:IsShown() and C.state == "paused", "Options didn't open, or the run didn't pause")
+	local labels = {}
+	for index, row in ipairs(options.gameRows) do
+		rawset(row.button.text, "SetText", function(self, text) rawset(self, "value", text) end)
+		labels[index] = row.label
+	end
+	local function Row(label)
+		for _, row in ipairs(options.gameRows) do
+			if row.label == label then
+				return row
+			end
+		end
+		error("no Options row " .. label)
+	end
+	local function Click(label)
+		local button = Row(label).button
+		button.scripts.OnClick(button)
+		return button.text.value
+	end
+	local sound = ns.db.settings.sound
+	assert(Click("Sound") == (sound and "Off" or "On") and ns.db.settings.sound ~= sound, "Options sound row")
+	Click("Sound")
+	local duck = ns.db.settings.duck
+	Click("Ducking")
+	assert(ns.db.settings.duck ~= duck, "Options ducking row")
+	Click("Ducking")
+	assert(Click("Resume countdown") == "Off" and ns.db.settings.countdown == false, "Options countdown row")
+	Click("Resume countdown")
+	local zoneLength = ns.Tuning.zoneLength
+	Click("Zone length")
+	assert(ns.Tuning.zoneLength ~= zoneLength and world.tuning.zoneLength == zoneLength, "Options zone length row")
+	ns.SetZoneLength(zoneLength)
+	assert(Click("Starting speed") == "14 yd/s (Fast, score x1.25)" and ns.Tuning.baseSpeed == 14, "Options starting speed row")
+	ns.SetStartSpeed(11)
+	local size = ns.db.settings.windowSize
+	Click("Window size")
+	assert(ns.db.settings.windowSize ~= size, "Options window size row")
+	C:SetWindowSize(size)
+	print("options rows: " .. table.concat(labels, ", "))
+
+	-- Model picks: the next choice for Mulgore's low hazard is saved, drawn
+	-- first from now on, and offered alongside the extras; going round comes
+	-- back to the usual model and clears the pick.
+	options.zoneIndex = 1
+	options:Refresh()
+	local mulgore = ns.Zones[1]
+	assert(mulgore.key == "mulgore", "first zone isn't Mulgore")
+	local choices = ns.Models.Choices(mulgore, "low")
+	local lowRow
+	for index, row in ipairs(options.modelRows) do
+		if row.role == "low" then
+			lowRow = index
+		end
+	end
+	options:Cycle(lowRow, 1)
+	local pickedKey = ns.Models.Key(choices[2])
+	assert(ns.db.models.mulgore and ns.db.models.mulgore.low == pickedKey, "pick not saved")
+	local list = C.renderer:ListFor({ role = "low" }, mulgore)
+	assert(ns.Models.Key(list[1]) == pickedKey and #list == #ns.Models.List(mulgore, "low"), "picked model isn't drawn first")
+	local extras = 0
+	for _, candidate in ipairs(ns.Models.Choices(mulgore, "gem")) do
+		assert(candidate.name, "a gem choice has no name")
+		for _, extra in ipairs(ns.ExtraModels.gem) do
+			if extra == candidate then
+				extras = extras + 1
+			end
+		end
+	end
+	assert(extras == #ns.ExtraModels.gem, "gem extras not offered")
+	for _ = 2, #choices do
+		options:Cycle(lowRow, 1)
+	end
+	assert(ns.db.models.mulgore == nil, "going round to the usual model didn't clear the pick")
+	-- Every zone's every role has a few named choices.
+	for _, zone in ipairs(ns.Zones) do
+		for _, item in ipairs(ns.Models.ROLES) do
+			local offered = ns.Models.Choices(zone, item.role)
+			assert(#offered >= 2, ("%s %s has %d choices"):format(zone.key, item.role, #offered))
+			for _, candidate in ipairs(offered) do
+				assert(candidate.name, ("%s %s: a choice with no name"):format(zone.key, item.role))
+			end
+		end
+	end
+	-- The preview shows the selected row's model once it loads.
+	options:Cycle(lowRow, 1)
+	options.frame.scripts.OnUpdate(options.frame, 0.1)
+	assert(options.previewCandidate == choices[2] and options.previewFit, "preview didn't show the picked model")
+	options.modelRows[1].scripts.OnClick(options.modelRows[1])
+	assert(ns.Models.Picked("mulgore", "low"), "pick lost on selecting its row")
+	options:Cycle(lowRow, -1)
+	assert(ns.Models.Picked("mulgore", "low") == nil, "stepping back didn't return to the usual model")
+
+	-- Esc closes Options, back on the pause screen.
+	C.keys.scripts.OnKeyDown(C.keys, "ESCAPE")
+	C.keys.scripts.OnKeyUp(C.keys, "ESCAPE")
+	assert(not options:IsShown() and C.state == "paused" and C.screens.paused.shown, "Esc didn't close Options back to the pause screen")
+	-- The title bar's Resume stays clickable over Options: resuming closes it,
+	-- so the keys reach the run again.
+	C:OpenOptions()
+	C.frame.pauseButton.scripts.OnClick(C.frame.pauseButton)
+	assert(not options:IsShown() and C.state == "running", "Resume left the run going on under Options")
+	-- From the start screen and the slash command too.
+	C:QuitRun()
+	C.screens.optionsButton.scripts.OnClick(C.screens.optionsButton)
+	assert(options:IsShown() and C.state == "start", "start screen's Options button")
+	-- So does starting a run (the minimap's Start a run, /schmoove start).
+	C:QuickStart()
+	assert(not options:IsShown() and C.state == "running", "a run started under Options")
+	C:QuitRun()
+	SlashCmdList.SCHMOOVINMAN("options")
+	assert(options:IsShown(), "/schmoove options")
+	options:Hide()
+	rawset(C.screens.speedButton.text, "SetText", nil)
+	rawset(hud.countdown, "SetText", nil)
+	for _, row in ipairs(options.gameRows) do
+		rawset(row.button.text, "SetText", nil)
+	end
+end
+-- Orc runs ----------------------------------------------------------------------
+do
+	local R = C.renderer
+	local world
+	-- Nobody on the lists and nothing forced: runs are as usual.
+	C.orcRole = nil
+	C:StartRun()
+	Frames(0.1)
+	assert(C.world.mode == nil and R.runner.list == ns.Assets.runner, "an orc run without the name or the command")
+
+	-- /schmoove orc: every run is an orc run.
+	SlashCmdList.SCHMOOVINMAN("orc")
+	assert(ns.OrcRun.forced, "/schmoove orc didn't force orc runs")
+	local labels = {}
+	rawset(C.hud.bannerLabel, "SetText", function(self, text) labels[#labels + 1] = text end)
+	rawset(C.hud.speed, "SetText", function(self, text) rawset(self, "value", text) end)
+	C:StartRun()
+	world = C.world
+	world.safeLeft = 1e9
+	Frames(0.1)
+	assert(world.mode == "orc", "a forced run isn't an orc run")
+	assert(labels[#labels] == "ORC RUN", "no orc-run banner: " .. tostring(labels[#labels]))
+	assert(R.runner.list == ns.Assets.orcRunner, "the runner isn't an orc")
+	assert(C.hud.speed.value == string.format("%.1f yd/s", world.taurenSpeed), "HUD speed isn't the Tauren's: " .. tostring(C.hud.speed.value))
+	assert(R.ground.near < -20, "road not drawn far enough back: " .. tostring(R.ground.near))
+
+	-- The pulled-back camera: the orc a fifth of the way down the view, and a
+	-- Tauren where they appear, 20 yards back, already in view.
+	local scene, orcCamera = R.scene, ns.Renderer.ORC_CAMERA
+	assert(math.abs(scene.pitch - orcCamera.pitch) < 1e-9 and math.abs(scene.fov - orcCamera.fov) < 1e-9
+		and math.abs(scene.distance - orcCamera.distance) < 1e-9, "camera isn't the orc-run camera")
+	local head, feet = FromTopOf(scene, 0, ns.Assets.runnerHeight), FromTopOf(scene, 0, 0)
+	local spawn = ns.Tuning.orcRun.spawnBehind
+	local backHead, backFeet = FromTopOf(scene, -spawn, ns.Assets.runnerHeight), FromTopOf(scene, -spawn, 0)
+	print(("orc view: orc's head %.2f from the top, feet %.2f; a Tauren %d yards back from %.2f to %.2f"):format(head, feet, spawn, backHead, backFeet))
+	assert(head > 0.1 and head < 0.3, ("orc's head not near the top of the view: %.2f"):format(head))
+	-- It comes in at the bottom edge: mostly in view, feet just below it.
+	assert(backHead < 0.8 and backFeet < 1.1, ("a Tauren where they appear is out of view: %.2f to %.2f"):format(backHead, backFeet))
+
+	-- Tauren come up from behind and are drawn; no joggers beside the road.
+	local drawn = 0
+	for _ = 1, 300 do
+		world.safeLeft = 1e9
+		Frames(1 / 60)
+		for _, entity in ipairs(world.entities) do
+			local record = R.records[entity.id]
+			if entity.role == "tauren" and record and record.ready and (record.actor.lastAlpha or 0) > 0 then
+				drawn = drawn + 1
+			end
+		end
+	end
+	assert(drawn > 0, "no Tauren drawn in an orc run")
+	assert(#R.joggers == 0, "roadside joggers in an orc run")
+
+	-- A Tauren passing on the left yells "On your left!", the next one on the
+	-- left "On your left... Again", and the orc answers with a complaint.
+	local quips = ns.Assets.quips
+	local taurenLines, orcLines, generalLines = {}, {}, {}
+	for _, line in ipairs(quips.taurenToOrc) do taurenLines[line] = true end
+	taurenLines[quips.passLeft], taurenLines[quips.passRight] = true, true
+	taurenLines[quips.passLeftAgain], taurenLines[quips.passRightAgain] = true, true
+	for _, line in ipairs(quips.orcRun) do orcLines[line] = true end
+	for _, line in ipairs(quips.general) do generalLines[line] = true end
+	local sideChance = quips.sideChance
+	local function Pass(lane, sides)
+		quips.sideChance = sides and 1 or 0
+		C:HideBubbles()
+		C.nextComplaint = 0
+		world.cursor, world.coinNext = 1e9, 1e9
+		world.entities = {}
+		said = {}
+		world:AddEntity("tauren", lane, world.time + 1.2, 0)
+		for _ = 1, 150 do
+			world.safeLeft = 1e9
+			Frames(1 / 60)
+		end
+		return said
+	end
+	world.runner.lane = 2
+	C.lastPassSide = nil
+	local first = Pass(1, true)
+	assert(first[1] == quips.passLeft, "a Tauren passing on the left didn't say so: " .. tostring(first[1]))
+	assert(first[2] and orcLines[first[2]], "the orc didn't complain: " .. tostring(first[2]))
+	local second = Pass(1, true)
+	assert(second[1] == quips.passLeftAgain, "a second pass on the left didn't say Again: " .. tostring(second[1]))
+	local third = Pass(3, false)
+	assert(third[1] and taurenLines[third[1]] and not generalLines[third[1]], "a Tauren used a line it shouldn't: " .. tostring(third[1]))
+	-- One in your own lane passes on neither side, so it never says which.
+	local sideLines = { [quips.passLeft] = true, [quips.passRight] = true, [quips.passLeftAgain] = true, [quips.passRightAgain] = true }
+	local own = Pass(2, true)
+	assert(own[1] and taurenLines[own[1]] and not sideLines[own[1]], "a Tauren in your lane gave a side: " .. tostring(own[1]))
+	print(("orc run: %s / %s / %s / %s"):format(first[1], first[2], second[1], third[1]))
+	quips.sideChance = sideChance
+
+	-- Trampled: the run ends, says why, with a candle on the saved run.
+	rawset(C.screens.crashText, "SetText", function(self, text) rawset(self, "value", text) end)
+	world.entities = {}
+	world.safeLeft = 0
+	world:AddEntity("tauren", world.runner.lane, world.time + 0.8, 0)
+	Frames(3)
+	assert(C.state == "over" and world.crashRole == "tauren", "a Tauren in your lane didn't end the run")
+	assert(C.screens.crashText.value:find("Trampled by a Schmoover"), "crash text: " .. tostring(C.screens.crashText.value))
+	assert(C.screens.lastEntry.orc == true, "orc run not marked on its saved score")
+	-- An orc player sees their own character (hair, colour, face) instead,
+	-- undressed and put in the orc warlock's starting clothes.
+	UnitRace = function() return "Orc", "Orc", 2 end
+	local tries, undresses, copies = calls.TryOn or 0, calls.Undress or 0, calls.SetModelByUnit or 0
+	C:StartRun()
+	Frames(0.2)
+	assert(R.runner.list == ns.Assets.orcPlayerRunner and R.runner.candidate.unit == "player", "an orc player's orc run doesn't use their own character")
+	assert(R.runner.dressed and R.runner.ready, "own character not dressed and shown")
+	assert((calls.SetModelByUnit or 0) > copies and (calls.Undress or 0) > undresses
+		and (calls.TryOn or 0) - tries >= #ns.Assets.orcPlayerDress, "own character not copied, undressed and put in the robes")
+	-- An item that won't go on falls back to the next; one still loading is
+	-- tried again until it arrives, and the character waits hidden till then.
+	local tried, pendingLeft = {}, 3
+	TryOnResult = function(link)
+		tried[#tried + 1] = link
+		if link == "item:6129" then
+			return 2 -- not wearable
+		elseif link == "item:1396" and pendingLeft > 0 then
+			pendingLeft = pendingLeft - 1
+			return 3 -- data pending
+		end
+		return 0
+	end
+	R:FreeRecord(R.runner)
+	R.runner = nil
+	C:StartRun()
+	Frames(0.05)
+	assert(not R.runner.dressed and not R.runner.ready, "own character shown before its outfit had loaded")
+	Frames(1.5)
+	assert(R.runner.dressed and R.runner.ready, "own character not dressed once its items loaded")
+	local seen = {}
+	for _, link in ipairs(tried) do
+		seen[link] = (seen[link] or 0) + 1
+	end
+	assert(seen["item:52543"] and not seen["item:57"], "the robe didn't fall back to the next one")
+	assert((seen["item:1396"] or 0) == 4 and not seen["item:52679"], "the loading pants weren't waited for: " .. tostring(seen["item:1396"]))
+	TryOnResult = nil
+	UnitRace = nil
+
+	SlashCmdList.SCHMOOVINMAN("orc")
+	assert(not ns.OrcRun.forced, "/schmoove orc didn't turn forcing off")
+
+	-- The next run is back to normal: the Tauren runner, chase camera and road.
+	rawset(C.hud.bannerLabel, "SetText", nil)
+	rawset(C.hud.speed, "SetText", nil)
+	C:StartRun()
+	Frames(0.1)
+	assert(C.world.mode == nil and R.runner.list == ns.Assets.runner, "runner still an orc after an orc run")
+	local chase = ns.Renderer.CAMERA
+	assert(math.abs(scene.pitch - chase.pitch) < 1e-9 and math.abs(scene.fov - chase.fov) < 1e-9, "camera stayed pulled back after an orc run")
+	assert(R.ground.near == -6, "road still drawn far back after an orc run")
+	rawset(C.screens.crashText, "SetText", nil)
+end
 print("templates used: " .. table.concat((function() local t = {} for k in pairs(templatesUsed) do t[#t + 1] = k end table.sort(t) return t end)(), ", "))
 print(("smoke ok: %d scores, guild board %d, %d messages sent, best %s"):format(#ns.db.scores, #ns.GuildBoard.List(), #sent, tostring(ns.db.scores[1].score)))

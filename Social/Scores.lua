@@ -33,8 +33,12 @@ function Scores.Add(world)
 		zones = world.zoneIndex,
 		zoneKey = world.crashZoneKey or world.zoneKey,
 		zoneLength = world.tuning.zoneLength,
+		-- Starting speed, whose multiplier is already in the score.
+		startSpeed = world.tuning.baseSpeed,
 		character = (ns.PlayerName()),
 		when = time(),
+		-- An orc run (Data/OrcRun.lua), shown with a candle.
+		orc = world.mode == "orc" or nil,
 	}
 	local list = ns.db.scores
 	tinsert(list, entry)

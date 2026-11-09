@@ -14,9 +14,14 @@ local Ground = {}
 Ground.__index = Ground
 ns.Ground = Ground
 
+-- The road runs from NEAR_Y (behind the runner) to FAR_Y. An orc run sets a
+-- nearer edge further back (SetNear), since the road behind is in view.
 local NEAR_Y, FAR_Y = -6, 110
 -- World size of one texture tile, in yards. Row steps must divide it.
 local TILE = 8
+-- Row length at y yards past the near edge's usual place: short near the
+-- camera, longer further off. Measured from the near edge, so a road that
+-- starts further back keeps short rows by the camera and fits in MAX_ROWS.
 local function RowStep(y)
 	if y < 24 then
 		return 1
@@ -93,6 +98,7 @@ function Ground.Create(scene, layer)
 	local self = setmetatable({}, Ground)
 	self.scene = scene
 	self.layer = layer
+	self.near = NEAR_Y
 
 	self.sky = layer:CreateTexture(nil, "BACKGROUND", nil, -8)
 	self.sky:SetColorTexture(1, 1, 1, 1)
@@ -211,6 +217,12 @@ function Ground:SetZone(zone)
 	end
 end
 
+-- Where the road starts, in yards from the runner (negative is behind); nil
+-- for the usual place.
+function Ground:SetNear(y)
+	self.near = y or NEAR_Y
+end
+
 -- Corners in order: far-left, near-left, near-right, far-right, as frame
 -- coordinates. Plain numbers, so drawing makes no tables.
 function Ground:SetQuad(texture, flx, fly, nlx, nly, nrx, nry, frx, fry)
@@ -272,12 +284,13 @@ function Ground:DrawCells(distance)
 	-- so no row crosses a tile boundary. Each edge is projected once and
 	-- shared by the rows either side of it.
 	local near, far = self.rowA, self.rowB
-	self:ProjectRow(NEAR_Y, near.x, near.y, near.ok)
+	local nearY = self.near
+	self:ProjectRow(nearY, near.x, near.y, near.ok)
 	local row = 0
-	local world = NEAR_Y + distance
-	local y = NEAR_Y
+	local world = nearY + distance
+	local y = nearY
 	while y < FAR_Y and row < MAX_ROWS do
-		local step = RowStep(y)
+		local step = RowStep(y - nearY + NEAR_Y)
 		local nextWorld = Floor(world, step) + step
 		local nextY = nextWorld - distance
 		row = row + 1
@@ -317,13 +330,14 @@ end
 function Ground:DrawMarkings(distance)
 	-- Dashes are fixed to the world, so they stream toward the runner.
 	local period = DASH_LENGTH + DASH_GAP
+	local nearY = self.near
 	local used = 0
 	for _, x in ipairs(DIVIDERS) do
-		local start = Floor(NEAR_Y + distance, period) - distance
+		local start = Floor(nearY + distance, period) - distance
 		local y = start
 		while y < FAR_Y * 0.8 and used < #self.dashes do
-			local y1, y2 = math.max(y, NEAR_Y), y + DASH_LENGTH
-			if y2 > NEAR_Y then
+			local y1, y2 = math.max(y, nearY), y + DASH_LENGTH
+			if y2 > nearY then
 				used = used + 1
 				self:Strip(self.dashes[used], x - LINE_WIDTH, x + LINE_WIDTH, y1, y2)
 			end
@@ -335,7 +349,7 @@ function Ground:DrawMarkings(distance)
 	end
 	-- Edges are flat colour, so one long strip shows no crease.
 	for index, x in ipairs(EDGES) do
-		self:Strip(self.edges[index], x - EDGE_WIDTH, x + EDGE_WIDTH, NEAR_Y, FAR_Y * 0.8)
+		self:Strip(self.edges[index], x - EDGE_WIDTH, x + EDGE_WIDTH, nearY, FAR_Y * 0.8)
 	end
 end
 
@@ -371,8 +385,8 @@ function Ground:Draw(distance)
 		return
 	end
 	self:DrawSky()
-	self:Strip(self.groundBacking, -200, 200, NEAR_Y, FAR_Y)
-	self:Strip(self.roadBacking, -ROAD_HALF, ROAD_HALF, NEAR_Y, FAR_Y)
+	self:Strip(self.groundBacking, -200, 200, self.near, FAR_Y)
+	self:Strip(self.roadBacking, -ROAD_HALF, ROAD_HALF, self.near, FAR_Y)
 	self:DrawCells(distance)
 	self:DrawMarkings(distance)
 end

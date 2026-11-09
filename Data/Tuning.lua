@@ -20,6 +20,15 @@ ns.Tuning = {
 		{ seconds = 45, name = "Marathon" },
 	},
 	baseSpeed = 11,
+	-- Starting speed choices (start screen and Options): the speed a run starts
+	-- at, and what its final score is multiplied by to match. baseSpeed and
+	-- scoreMultiplier hold the one chosen (see ns.SetStartSpeed).
+	startSpeeds = {
+		{ speed = 8, name = "Slow", multiplier = 0.75 },
+		{ speed = 11, name = "Normal", multiplier = 1 },
+		{ speed = 14, name = "Fast", multiplier = 1.25 },
+	},
+	scoreMultiplier = 1,
 	rampPerSecond = 0.03,
 	zoneBump = 2.2,
 	bumpTime = 1.5,
@@ -93,6 +102,8 @@ ns.Tuning = {
 		spear = 50,
 		bossDriven = 500,
 		bossSurvived = 150,
+		-- Orc runs: each Tauren that gets past without trampling you.
+		dodge = 5,
 	},
 	-- Alliance joggers on the track: the chance one jogs in the gap after a
 	-- chunk, from this zone on, at this share of your speed.
@@ -125,5 +136,36 @@ ns.Tuning = {
 		throwLead = 2.4,
 		throwMax = 54,
 		landLead = 1.1,
+	},
+
+	-- Orc runs (see Data/OrcRun.lua). The orc runs at the zone-1 speed all run.
+	-- Tauren come up from behind `taurenLead` yards a second faster at first,
+	-- and speed up on the normal speed curve (a rise through each zone and a
+	-- step up on each new one), so they get harder to dodge.
+	orcRun = {
+		taurenLead = 5,
+		-- A Tauren appears this far back (the bottom of the pulled-back view) and
+		-- is gone this far ahead. Coins left behind go at despawnBehind.
+		spawnBehind = 20,
+		despawnAhead = 45,
+		despawnBehind = -30,
+		-- Seconds to the first Tauren drawing level with you.
+		firstRow = 4,
+		-- Seconds between rows of Tauren, shrinking each zone to rowGapMin.
+		rowGapStart = 1.8,
+		rowGapPerZone = 0.12,
+		rowGapMin = 0.8,
+		-- From zone pairFrom, the chance of two Tauren in a row (never three),
+		-- growing each zone up to pairMax.
+		pairFrom = 2,
+		pairChance = 0.2,
+		pairPerZone = 0.08,
+		pairMax = 0.6,
+		-- Coin lines from ahead: one every coinGap seconds (a random time in the
+		-- range), coinCount long, sometimes ending in a gem.
+		coinGap = { 2.5, 4.5 },
+		coinCount = 5,
+		coinSpacing = 0.22,
+		gemChance = 0.15,
 	},
 }
