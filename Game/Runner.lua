@@ -11,6 +11,12 @@ function Runner.New(tuning)
 	self.tuning = tuning
 	self.lane = 2
 	self.x = tuning.lanes[2]
+	-- x is where the lane change has got to (laneX) plus any sideways drift
+	-- from a crosswind (offset). The world sets laneChangeTime, drift, gravity
+	-- and jumpSpeed for the zone's twist; nil (0 for drift) otherwise.
+	self.laneX = tuning.lanes[2]
+	self.offset = 0
+	self.drift = 0
 	self.z = 0
 	self.vz = 0
 	self.state = "run"
@@ -43,11 +49,12 @@ function Runner:Input(action)
 			self.lane = lane
 			return "lane"
 		end
-	elseif self.flying then
+	elseif self.flying or self.launch then
+		-- Nothing to jump or duck on a Wind Rider or in the air off a ramp.
 		return nil
 	elseif action == "jump" then
 		if not self:IsAirborne() then
-			self.vz = tuning.jumpSpeed
+			self.vz = self.jumpSpeed or tuning.jumpSpeed
 			self.state = "jump"
 			self.duckLeft = 0
 			return "jump"
@@ -66,9 +73,18 @@ function Runner:Input(action)
 	return nil
 end
 
+-- Thrown off a ramp: an arc `height` yards high that lasts `duration`
+-- seconds, whatever keys are pressed. Lanes can still be changed in the air.
+function Runner:Launch(duration, height)
+	self.launch = { t = 0, duration = math.max(0.2, duration), height = height }
+	self.state = "jump"
+	self.duckLeft = 0
+end
+
 function Runner:SetFlying(flying)
 	self.flying = flying
 	if flying then
+		self.launch = nil
 		self.state = "fly"
 		self.duckLeft = 0
 	end
@@ -86,12 +102,29 @@ function Runner:Update(h)
 	-- Lateral: move toward the chosen lane at a constant rate.
 	local targetX = tuning.lanes[self.lane]
 	local laneWidth = tuning.lanes[2] - tuning.lanes[1]
-	local step = laneWidth / tuning.laneChangeTime * h
-	if math.abs(targetX - self.x) <= step then
-		self.x = targetX
+	local step = laneWidth / (self.laneChangeTime or tuning.laneChangeTime) * h
+	local laneX = self.laneX
+	if math.abs(targetX - laneX) <= step then
+		laneX = targetX
 	else
-		self.x = self.x + (targetX > self.x and step or -step)
+		laneX = laneX + (targetX > laneX and step or -step)
 	end
+	self.laneX = laneX
+
+	-- A crosswind pushes you sideways while you're in the air (not on a Wind
+	-- Rider); on the ground you come back to the middle of your lane.
+	local want = (self.z > 0 and not self.flying and self.state ~= "crash") and (self.drift or 0) or 0
+	local offset = self.offset
+	if offset ~= want then
+		local slide = (tuning.driftRate or 2.5) * h
+		if math.abs(want - offset) <= slide then
+			offset = want
+		else
+			offset = offset + (want > offset and slide or -slide)
+		end
+		self.offset = offset
+	end
+	self.x = laneX + offset
 
 	if self.state == "crash" then
 		return nil
@@ -109,8 +142,25 @@ function Runner:Update(h)
 		return nil
 	end
 
+	local launch = self.launch
+	if launch then
+		launch.t = launch.t + h
+		local progress = launch.t / launch.duration
+		if progress >= 1 then
+			self.launch = nil
+			self.z, self.vz = 0, 0
+			self.state = "run"
+			return "land"
+		end
+		-- Never quite on the ground, and vz says whether it's rising or falling.
+		self.z = math.max(0.01, 4 * launch.height * progress * (1 - progress))
+		self.vz = progress < 0.5 and 1 or -1
+		self.state = "jump"
+		return nil
+	end
+
 	if self.z > 0 or self.vz > 0 then
-		self.vz = self.vz - tuning.gravity * h
+		self.vz = self.vz - (self.gravity or tuning.gravity) * h
 		self.z = self.z + self.vz * h
 		if self.z <= 0 then
 			self.z = 0

@@ -50,6 +50,9 @@ ns.Tuning = {
 
 	-- Runner.
 	laneChangeTime = 0.14,
+	-- How fast a crosswind pushes you off your lane's middle in the air, and
+	-- lets you back onto it on landing, in yards a second.
+	driftRate = 2.5,
 	gravity = 30,
 	jumpSpeed = 10.5,
 	fastFallSpeed = 16,
@@ -97,6 +100,10 @@ ns.Tuning = {
 		duck = 3,
 		-- For each Alliance jogger knocked out of your lane.
 		knock = 5,
+		-- For each ramp taken over a pit.
+		ramp = 5,
+		-- For each wisp caught (Ashenvale's twist).
+		wisp = 1,
 		-- Boss fights: each spear that hits, and the bonus for driving the boss
 		-- off or for lasting until it gives up.
 		spear = 50,
@@ -105,6 +112,84 @@ ns.Tuning = {
 		-- Orc runs: each Tauren that gets past without trampling you.
 		dodge = 5,
 	},
+	-- Combos: a run of clean moves (jumps, ducks, ramps and Alliance knocks).
+	-- Every `every` of them raises what a move pays by `step`, up to `max`
+	-- times. Thick Hide breaking ends it. Left `timeout` seconds without a
+	-- move it starts to run down, losing `decay` every `decayEvery` seconds;
+	-- only time with something ahead to jump, duck, ride or knock counts.
+	combo = { every = 5, step = 0.5, max = 3, timeout = 6, decay = 2, decayEvery = 2 },
+
+	-- Pits: a hole right across the road, `tile` yards to a tile and 2 or 3
+	-- tiles long (set by the pattern), with a ramp at its edge in one or two
+	-- lanes. Running onto a ramp throws you over it in an arc `height` yards
+	-- high, coming down `landing` seconds past the far edge; `coins` air coins
+	-- a tile lie along the way. The pit starts `lead` yards past the ramp row.
+	pit = { tile = 8, lead = 0.8, landing = 0.15, height = 2.6, coins = 2 },
+
+	-- Zone twists: one special rule in some zones, by zone key.
+	--   laneChange, spacing  seconds a lane change takes there, and what the
+	--               time between rows and chunks is multiplied by to make up
+	--               for it. The fairness check allows laneChangeTime plus a
+	--               reaction time (0.15 s) for each lane moved; spacing is at
+	--               least (laneChange + 0.15) / (laneChangeTime + 0.15), so
+	--               whatever can be passed elsewhere can be passed there
+	--   ventChance  chance of a lava vent in the gap after a chunk; ventExtra
+	--               seconds of clear road are added after it, so it can always
+	--               be stepped round and the next chunk still reached
+	--   gustEvery, gustLength, gustPull  a gust every so many seconds, lasting
+	--               gustLength, that pulls the fog in by gustPull of its range
+	--               (drawing only)
+	--   drift, driftEvery  yards a crosswind pushes you sideways in the air
+	--               (too little to reach the next lane's hazard), turning
+	--               round every driftEvery seconds
+	--   steam       the vents are steam vents (Ironforge): the same rule, drawn
+	--               as a grate and a plume
+	--   chargers, chargerEarly  what the weight of patterns with a charging
+	--               creature is multiplied by, and how many zones sooner they
+	--               start; it also allows the patterns marked twist = "chargers"
+	--   wisps       a trail of wisps along one safe way through each chunk
+	--               (Tuning.wisps), a point each
+	--   powerups, powerupGap  what the weight of the power-up pattern and the
+	--               shortest time between power-ups are multiplied by
+	--   loot, gemChance  what the weight of patterns with only tokens is
+	--               multiplied by, and the chance a ground coin is a gem instead
+	--   gravity, jumpSpeed  the runner's there, for floaty jumps, with `spacing`
+	--               to match: a jump lasts 2 * jumpSpeed / gravity seconds, and
+	--               spacing is at least that plus 0.05, over the fairness
+	--               check's 0.75 s between jumps
+	--   allianceChance  the chance of an Alliance jogger after a chunk there
+	--   shield      you're given Thick Hide on entering the zone
+	--   escort, gifts, giftEvery, giftExtra  a famous face (a name in
+	--               Assets.joggers) runs ahead beside the road and throws a
+	--               gift into a lane every giftEvery seconds or so, in the gap
+	--               after a chunk, with giftExtra seconds of clear road after
+	--               it. The gifts take turns: a power-up's name, or "coins"
+	--               for a short line of them (Tuning.escort)
+	twists = {
+		winterspring = { name = "Icy road: lane changes slide", laneChange = 0.2, spacing = 1.25 },
+		burningsteppes = { name = "Lava vents: keep off the glow", ventChance = 0.45, ventExtra = 0.8 },
+		silithus = { name = "Sandstorm: gusts hide the road", gustEvery = 11, gustLength = 5, gustPull = 0.4 },
+		thousandneedles = { name = "Crosswind: jumps drift", drift = 0.4, driftEvery = 4 },
+		barrens = { name = "Stampede country: more chargers", chargers = 3, chargerEarly = 1 },
+		ashenvale = { name = "Wisps: follow them through", wisps = true },
+		ungoro = { name = "Crystal pylons: more power-ups", powerups = 3, powerupGap = 0.5 },
+		westfall = { name = "Defias loot: more coins and gems", loot = 2.5, gemChance = 0.08 },
+		moonglade = { name = "Moonlight: jumps float", gravity = 22, jumpSpeed = 9.9, spacing = 1.3 },
+		stormwind = { name = "Crowded streets: more joggers to knock", allianceChance = 0.9 },
+		darnassus = { name = "Moonwell blessing: Thick Hide", shield = true },
+		ironforge = { name = "Steam vents: keep out of the steam", ventChance = 0.45, ventExtra = 0.8, steam = true },
+		thunderbluff = { name = "Cairne runs ahead: catch the gifts", escort = "Cairne Bloodhoof", gifts = { "stampede", "coins" }, giftEvery = 6, giftExtra = 1.0 },
+		orgrimmar = { name = "Thrall runs ahead: catch the gifts", escort = "Thrall", gifts = { "goldRush", "coins" }, giftEvery = 6, giftExtra = 1.0 },
+		undercity = { name = "Sylvanas runs ahead: catch the gifts", escort = "Sylvanas Windrunner", gifts = { "shield", "coins" }, giftEvery = 6, giftExtra = 1.0 },
+	},
+	-- Wisps: one `lead` seconds before each row on the way, unless something
+	-- solid stands in that lane within `clear` seconds of the spot.
+	wisps = { lead = 0.3, clear = 0.35 },
+	-- Escorts: where one runs, in yards ahead (near enough to see without the
+	-- boss camera), and a gift of coins: how many, and the seconds between them.
+	-- A gift is thrown from no further than the escort.
+	escort = { distance = 24, coins = 4, coinSpacing = 0.18 },
+
 	-- Alliance joggers on the track: the chance one jogs in the gap after a
 	-- chunk, from this zone on, at this share of your speed.
 	alliance = { chance = 0.35, minZone = 1, speedShare = 0.45 },

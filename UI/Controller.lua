@@ -403,7 +403,7 @@ function Controller:HandleEvents(now)
 			self.renderer:SetZone(zone)
 			-- In an orc run, the Tauren's speed.
 			local toSpeed = world:SpeedAt(world.course + world.tuning.bumpTime)
-			self.hud:ShowBanner(zone.name, event.fromSpeed, toSpeed, now)
+			self.hud:ShowBanner(zone.name, event.fromSpeed, toSpeed, now, world:Twist())
 			self.flashAt = now
 			self.frame.flash:SetColorTexture(zone.fog.color[1], zone.fog.color[2], zone.fog.color[3], 1)
 			ns.PlaySound("zone")

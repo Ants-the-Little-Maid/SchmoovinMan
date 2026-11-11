@@ -47,6 +47,10 @@ function Hud.Create(layer)
 	self.score:SetPoint("TOPLEFT", scoreLabel, "BOTTOMLEFT", 0, -3)
 	self.best = UI.Text(panel, 12, C.subText)
 	self.best:SetPoint("TOPLEFT", self.score, "BOTTOMLEFT", 0, -3)
+	-- The combo, on the best score's row: clean moves in a row and what the
+	-- next one pays. Shown from two.
+	self.combo = UI.Text(panel, 12, C.orange)
+	self.combo:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -53)
 	local divider = panel:CreateTexture(nil, "ARTWORK")
 	divider:SetColorTexture(UI.Hex(C.divider))
 	divider:SetHeight(1)
@@ -226,8 +230,12 @@ function Hud:ShowMessage(style, label, title, line, now)
 	self.bannerUntil = now + 3
 end
 
-function Hud:ShowBanner(zoneName, fromSpeed, toSpeed, now)
+-- twist: the zone's twist (Tuning.twists), if it has one, named on the line.
+function Hud:ShowBanner(zoneName, fromSpeed, toSpeed, now, twist)
 	local line = fromSpeed and string.format("Speed up! %.1f -> %.1f yd/s", fromSpeed, toSpeed) or ""
+	if twist and twist.name then
+		line = line == "" and twist.name or (line .. "  -  " .. twist.name)
+	end
 	self:ShowMessage("zone", "ENTERING", zoneName, line, now)
 end
 
@@ -339,6 +347,15 @@ function Hud:Update(world, best, zoneName, now)
 	end
 	if self:Changed("tokens", world.tokens) then
 		self.tokens:SetText(UI.FormatNumber(world.tokens))
+	end
+	local combo = world.combo or 0
+	if self:Changed("combo", combo) then
+		if combo >= 2 then
+			local multiplier = ns.Rules.ComboMultiplier(tuning, combo + 1)
+			self.combo:SetText(multiplier > 1 and ("Combo %d  x%s"):format(combo, tostring(multiplier)) or ("Combo %d"):format(combo))
+		else
+			self.combo:SetText("")
+		end
 	end
 
 	-- Power-up bars, top to bottom in a fixed order. They're laid out again

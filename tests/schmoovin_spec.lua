@@ -227,7 +227,7 @@ end
 
 -- A planning bot survives -------------------------------------------------------
 
-local ROLE_CODE = { low = "L", high = "H", block = "B", wall = "B", charger = "B", tauren = "B" }
+local ROLE_CODE = { low = "L", high = "H", block = "B", wall = "B", charger = "B", tauren = "B", pitedge = "B", vent = "B" }
 
 -- Lane of the planned path at the first row still ahead.
 local function NextLane(states, startState, now)
@@ -252,8 +252,8 @@ local function SortByTime(items)
 	end)
 end
 
-local function PlayBot(seed, tuning, seconds, mode)
-	local world = World.New(seed, tuning, { mode = mode })
+local function PlayBot(seed, tuning, seconds, mode, zones)
+	local world = World.New(seed, tuning, { mode = mode, zones = zones })
 	local runner = world.runner
 	local lastJump, lastDuck = -1000, -1000
 	local target = runner.lane
@@ -351,6 +351,10 @@ for seed = 1, seedCount do
 	for _, duck in ipairs({ true, false }) do
 		local tuning = copy(Tuning)
 		tuning.duckEnabled = duck
+		-- No Thick Hide from Darnassus (tested on its own below): it would soak
+		-- up a hit that ought to fail the run.
+		tuning.twists = copy(Tuning.twists)
+		tuning.twists.darnassus = nil
 		local world = PlayBot(seed, tuning, minutes * 60)
 		check(("bot survives seed %d duck=%s"):format(seed, tostring(duck)), not world.over,
 			("crashed into %s at %.1fs in zone %d"):format(tostring(world.crashRole), world.time, world.zoneIndex))
@@ -1078,6 +1082,354 @@ do
 		end
 	end
 	check("Alliance joggers keep out of a charger's lane", joggers == 20 and clear, joggers)
+end
+
+-- Combos, gaps and zone twists -----------------------------------------------------
+
+do
+	local M = Rules.ComboMultiplier
+	check("combo multiplier steps up every five moves, to three times",
+		M(Tuning, 1) == 1 and M(Tuning, 5) == 1 and M(Tuning, 6) == 1.5 and M(Tuning, 11) == 2 and M(Tuning, 500) == 3)
+	local world = World.New(5, copy(Tuning), { bosses = false })
+	for _ = 1, 6 do
+		world:ComboPoints(2)
+	end
+	check("a move deep in a combo pays more", world:ComboPoints(2) == 3 and world.combo == 7)
+	world.runner.flying = true
+	world.time = world.time + Tuning.combo.timeout + 1
+	world:UpdateCombo(Tuning.combo.timeout + 1)
+	check("a Wind Rider flight doesn't end a combo", world.combo == 7)
+	world.runner.flying = false
+	world.movesAhead = false
+	world.time = world.time + Tuning.combo.timeout + 1
+	world:UpdateCombo(Tuning.combo.timeout + 1)
+	check("a stretch with nothing to do doesn't end a combo", world.combo == 7)
+	-- Left too long, it runs down by two every two seconds rather than ending.
+	world.movesAhead = true
+	world.time = world.time + Tuning.combo.timeout + 1
+	world:UpdateCombo(0.01)
+	local first = world.combo
+	world.time = world.time + 0.5
+	world:UpdateCombo(0.01)
+	local held = world.combo
+	world.time = world.time + Tuning.combo.decayEvery
+	world:UpdateCombo(0.01)
+	check("a combo left too long runs down in steps", first == 5 and held == 5 and world.combo == 3 and world.bestCombo == 7,
+		("%d, %d, %d"):format(first, held, world.combo))
+	for _ = 1, 3 do
+		world.time = world.time + Tuning.combo.decayEvery
+		world:UpdateCombo(0.01)
+	end
+	check("and ends once it has run right down", world.combo == 0)
+
+	-- Pits: a ramp throws you over, to land past the far edge; a lane with
+	-- no ramp drops you in; and every pit has a ramp.
+	local function PitWorld(lane)
+		local pitWorld = World.New(4, copy(Tuning), { bosses = false })
+		pitWorld.cursor = 1e9
+		local ramp = pitWorld:AddEntity("ramp", 2, 0.5, 0)
+		ramp.leave = 2.0
+		pitWorld:AddEntity("pitedge", 1, 0.5, 0)
+		pitWorld:AddEntity("pitedge", 3, 0.5, 0)
+		if lane ~= 2 then
+			pitWorld:Input(lane < 2 and "left" or "right")
+		end
+		return pitWorld
+	end
+	local over = PitWorld(2)
+	while over.time < 1.2 do
+		over:Step(Tuning.step)
+	end
+	local high = over.runner.z
+	over:Input("right")
+	check("a ramp throws you over the pit", over.runner.launch ~= nil and high > 1.5 and not over.over and over.jumps == 1 and over.combo == 1, high)
+	while over.time < 2.0 do
+		over:Step(Tuning.step)
+	end
+	check("still in the air at the pit's far edge, though over a lane with no ramp", over.runner.launch ~= nil and not over.over)
+	while over.time < 2.4 do
+		over:Step(Tuning.step)
+	end
+	check("and sets you down past it", over.runner.launch == nil and over.runner.z == 0 and not over.over)
+	local fell = PitWorld(1)
+	while fell.time < 1.0 and not fell.over do
+		fell:Step(Tuning.step)
+	end
+	check("a lane with no ramp drops you in the pit", fell.over and fell.crashRole == "pitedge")
+	local ramped = true
+	for _, pattern in ipairs(Patterns.LIST) do
+		if pattern.pit and not (#pattern.rows == 1 and pattern.rows[1][2]:find("R") and not pattern.rows[1][2]:find("%.")) then
+			ramped = false
+		end
+	end
+	check("every pit has a ramp, and an edge or ramp in every lane", ramped)
+	local edge, ramp = Rules.SHAPES.pitedge, Rules.SHAPES.ramp
+	check("a ramp and the pit's edge beside it leave no spot between them and don't overlap",
+		math.abs(edge.halfWidth + ramp.halfWidth + 2 * Tuning.runnerHalfWidth - (Tuning.lanes[2] - Tuning.lanes[1])) < 1e-9)
+	check("a vent is stepped round", Rules.REQUIREMENT.vent == "avoid")
+
+	-- Each twist is fair by its numbers, whatever the seeds above happened to meet.
+	local reaction = Patterns.LIMITS.reaction
+	local moveCost = Tuning.laneChangeTime + reaction
+	local ice = Tuning.twists.winterspring
+	check("ice spaces rows out enough for its slower lane changes", ice.spacing >= (ice.laneChange + reaction) / moveCost)
+	local vents = Tuning.twists.burningsteppes
+	check("a lava vent leaves time to step out of its lane and then to cross the road",
+		Tuning.gapMin / 2 >= moveCost and Tuning.gapMin / 2 + vents.ventExtra >= 2 * moveCost)
+	local wind = Tuning.twists.thousandneedles
+	local widest = 0
+	for _, shape in pairs(Rules.SHAPES) do
+		widest = math.max(widest, shape.halfWidth)
+	end
+	check("a crosswind can't push you into the next lane's hazard",
+		(Tuning.lanes[2] - Tuning.lanes[1]) - wind.drift > widest + Tuning.runnerHalfWidth)
+	-- Lava vents turn up, each with clear road either side: time to step out
+	-- of its lane before it, and to cross the whole road after it.
+	local vented = World.New(11, copy(Tuning), { bosses = false, recordTimeline = true, zones = { "mulgore", "burningsteppes" } })
+	local ventAt = {}
+	while vented.time < 120 do
+		vented.safeLeft = 1e9
+		vented:Step(0.1)
+		vented:DrainEvents()
+		for _, entity in ipairs(vented.entities) do
+			if entity.role == "vent" then
+				ventAt[entity.id] = entity.arrive
+			end
+		end
+	end
+	local vents, roomy = 0, true
+	for _, at in pairs(ventAt) do
+		vents = vents + 1
+		for _, item in ipairs(vented.timeline) do
+			local away = item.t - at
+			if Patterns.REQUIREMENT[item.code] and math.abs(away) > 1e-9 and away > -moveCost + 1e-9 and away < 2 * moveCost - 1e-9 then
+				roomy = false
+			end
+		end
+	end
+	check("lava vents turn up in Burning Steppes with clear road either side", vents > 5 and roomy, vents)
+	check("spears on ice keep longer margins", select(3, World.New(2, copy(Tuning), { zones = { "winterspring", "mulgore" } }):Spacing(1)) == ice.spacing)
+
+	local icy = World.New(9, copy(Tuning), { bosses = false, zones = { "winterspring", "mulgore" } })
+	icy:Step(0.1)
+	check("ice slows lane changes in its zone", icy.runner.laneChangeTime == ice.laneChange and icy:Twist() == icy.tuning.twists.winterspring)
+end
+
+-- The other zones' twists --------------------------------------------------------
+
+do
+	local twists = Tuning.twists
+	local named = true
+	for _, key in ipairs(World.DEFAULT_ZONES) do
+		if key ~= "mulgore" and not (twists[key] and twists[key].name) then
+			named = false
+		end
+	end
+	check("every zone but Mulgore has a named twist", named and twists.mulgore == nil)
+
+	-- Runs a world through `seconds` untouchable, in Mulgore then `key` for
+	-- good, and returns it with every entity it ever had, by id.
+	local function Visit(key, seconds, tuning, seed)
+		local world = World.New(seed or 13, tuning or copy(Tuning), { bosses = false, recordTimeline = true, zones = { "mulgore", key } })
+		local met, events = {}, {}
+		while world.time < seconds do
+			world.safeLeft = 1e9
+			world:Step(0.1)
+			for _, event in ipairs(world:DrainEvents()) do
+				events[#events + 1] = { type = event.type, role = event.role }
+			end
+			for _, entity in ipairs(world.entities) do
+				met[entity.id] = entity
+			end
+		end
+		return world, met, events
+	end
+	local function Count(met, test)
+		local count = 0
+		for _, entity in pairs(met) do
+			if test(entity) then
+				count = count + 1
+			end
+		end
+		return count
+	end
+	local function Without(key)
+		local tuning = copy(Tuning)
+		tuning.twists = copy(Tuning.twists)
+		tuning.twists[key] = nil
+		return tuning
+	end
+	local function Has(pattern, code)
+		for _, row in ipairs(pattern.rows) do
+			if row[2]:find(code, 1, true) then
+				return true
+			end
+		end
+		return false
+	end
+
+	-- The Barrens: chargers a zone sooner, more of them, and two abreast.
+	local rng = ns.Random.New(5)
+	local early, pairs_, strays, plain, twisted = 0, 0, 0, 0, 0
+	for _ = 1, 3000 do
+		if Has(Patterns.Pick(rng, 2, true, nil, twists.barrens), "C") then
+			early = early + 1
+		end
+		local usual = Patterns.Pick(rng, 5, true)
+		if usual.twist or Has(Patterns.Pick(rng, 2, true), "C") then
+			strays = strays + 1
+		end
+		if Has(usual, "C") then
+			plain = plain + 1
+		end
+		local there = Patterns.Pick(rng, 5, true, nil, twists.barrens)
+		if Has(there, "C") then
+			twisted = twisted + 1
+		end
+		if there.name == "chargerPair" then
+			pairs_ = pairs_ + 1
+		end
+	end
+	check("the Barrens has chargers a zone sooner, and more of them, some abreast", early > 0 and twisted > plain * 1.5 and pairs_ > 0, ("%d, %d of %d"):format(early, twisted, plain))
+	check("elsewhere chargers keep to their zones and never run abreast", strays == 0, strays)
+
+	-- Un'Goro: the power-up pattern more often, and power-ups closer together.
+	local usualUps, moreUps = 0, 0
+	for _ = 1, 3000 do
+		if Has(Patterns.Pick(rng, 5, true), "P") then
+			usualUps = usualUps + 1
+		end
+		if Has(Patterns.Pick(rng, 5, true, nil, twists.ungoro), "P") then
+			moreUps = moreUps + 1
+		end
+	end
+	local function IsPowerup(entity)
+		return Rules.POWERUP[entity.role] ~= nil
+	end
+	local _, crater = Visit("ungoro", 150)
+	local _, craterPlain = Visit("ungoro", 150, Without("ungoro"))
+	check("Un'Goro has more power-ups", moreUps > usualUps * 1.5 and Count(crater, IsPowerup) > Count(craterPlain, IsPowerup),
+		("%d against %d"):format(Count(crater, IsPowerup), Count(craterPlain, IsPowerup)))
+
+	-- Westfall: more gems.
+	local function IsGem(entity)
+		return entity.role == "gem"
+	end
+	local _, loot = Visit("westfall", 150)
+	local _, lootPlain = Visit("westfall", 150, Without("westfall"))
+	check("Westfall has more gems", Count(loot, IsGem) > Count(lootPlain, IsGem) + 3, ("%d against %d"):format(Count(loot, IsGem), Count(lootPlain, IsGem)))
+
+	-- Moonglade: floaty jumps, with rows spaced out to match.
+	local moon = twists.moonglade
+	local airtime = 2 * moon.jumpSpeed / moon.gravity
+	check("moonlight spaces rows out enough for its longer jumps", moon.spacing >= (airtime + 0.05) / Patterns.LIMITS.jumpThenJump, airtime)
+	local glade = World.New(9, copy(Tuning), { bosses = false, zones = { "moonglade", "mulgore" } })
+	glade.cursor = 1e9
+	glade:Step(0.05)
+	glade:Input("jump")
+	local hang, peak = 0, 0
+	for _ = 1, 240 do
+		glade:Step(Tuning.step)
+		if glade.runner.z > 0 then
+			hang = hang + Tuning.step
+		end
+		peak = math.max(peak, glade.runner.z)
+	end
+	check("a jump by moonlight hangs longer and goes higher", near(hang, airtime, 0.03) and peak > Tuning.jumpSpeed ^ 2 / (2 * Tuning.gravity), hang)
+	check("and stays under a Wind Rider's height", peak < Tuning.flyHeight)
+
+	-- Stormwind: more Alliance joggers.
+	local function IsAlliance(entity)
+		return entity.role == "alliance"
+	end
+	local _, city = Visit("stormwind", 150)
+	local _, cityPlain = Visit("stormwind", 150, Without("stormwind"))
+	check("Stormwind has more Alliance joggers", Count(city, IsAlliance) > Count(cityPlain, IsAlliance) * 1.5,
+		("%d against %d"):format(Count(city, IsAlliance), Count(cityPlain, IsAlliance)))
+
+	-- Darnassus: Thick Hide on the way in.
+	local blessed, _, blessings = Visit("darnassus", Tuning.zoneLength + 0.5)
+	local given = false
+	for index, event in ipairs(blessings) do
+		if event.type == "powerup" and event.role == "shield" and blessings[index - 1] and blessings[index - 1].type == "zone" then
+			given = true
+		end
+	end
+	check("Darnassus gives Thick Hide on the way in", blessed.shield and given)
+
+	-- Ironforge: vents, as steam.
+	local _, forge = Visit("ironforge", 150)
+	check("Ironforge has steam vents", twists.ironforge.steam and Count(forge, function(entity) return entity.role == "vent" end) > 5)
+	check("a steam vent leaves the same clear road as a lava vent", twists.ironforge.ventExtra >= twists.burningsteppes.ventExtra)
+
+	-- Ashenvale: wisps along a way through, never where you can't go.
+	local vale, wisps = Visit("ashenvale", 150)
+	local caught, blockedWisps = 0, 0
+	local avoid = { B = true, W = true, C = true, X = true }
+	for _, entity in pairs(wisps) do
+		if entity.role == "wisp" then
+			caught = caught + 1
+			for _, item in ipairs(vale.timeline) do
+				if avoid[item.code] and item.lane == entity.lane and math.abs(item.t - entity.arrive) < 0.3 then
+					blockedWisps = blockedWisps + 1
+				end
+			end
+		end
+	end
+	check("Ashenvale has wisps, none of them in a blocked spot", caught > 30 and blockedWisps == 0, ("%d wisps, %d blocked"):format(caught, blockedWisps))
+	local wispWorld = MoveWorld(51)
+	wispWorld:AddEntity("wisp", wispWorld.runner.lane, wispWorld.time + 0.5, 0.9)
+	RunFor(wispWorld, 1.0)
+	check("a wisp is worth a point", wispWorld.tokenPoints == Tuning.points.wisp and wispWorld.tokens == 1, wispWorld.tokenPoints)
+
+	-- The Horde capitals: an escort's gifts.
+	local moveCost = Tuning.laneChangeTime + Patterns.LIMITS.reaction
+	for _, key in ipairs({ "thunderbluff", "orgrimmar", "undercity" }) do
+		local twist = twists[key]
+		local famous = false
+		for _, list in ipairs(ns.Assets.joggers) do
+			famous = famous or list.name == twist.escort
+		end
+		local town, gifts = Visit(key, 150)
+		local kinds, count, roomy, landed = {}, 0, true, true
+		for _, entity in pairs(gifts) do
+			if entity.gift then
+				count = count + 1
+				kinds[entity.role] = true
+				landed = landed and entity.thrown and entity.throwMax < Tuning.escort.distance
+				for _, item in ipairs(town.timeline) do
+					local away = item.t - entity.arrive
+					if Patterns.REQUIREMENT[item.code] and away > -moveCost + 1e-9 and away < 2 * moveCost - 1e-9 then
+						roomy = false
+					end
+				end
+			end
+		end
+		check(key .. " has an escort who is one of the famous faces", famous, twist.escort)
+		check(key .. "'s escort throws its gifts in turn, with clear road around each",
+			count > 10 and kinds.coin and kinds[twist.gifts[1]] and roomy and landed, count)
+	end
+	local soon = true
+	for speed = Tuning.baseSpeed, Tuning.maxSpeed do
+		local from = Tuning.escort.distance - 2
+		if Rules.ThrowPhase(Tuning, speed * 0.4, speed, from) ~= "landed" or Rules.ThrowPhase(Tuning, from + 1, speed, from) ~= "waiting" then
+			soon = false
+		end
+	end
+	check("a gift is thrown from no further than the escort and lands 0.4 s or more ahead of you", soon)
+	local giftWorld = MoveWorld(52)
+	local gift = giftWorld:AddEntity("coin", giftWorld.runner.lane, giftWorld.time + 4, 0.9)
+	gift.thrown, gift.gift, gift.phase, gift.throwMax = true, true, "waiting", Tuning.escort.distance - 2
+	RunFor(giftWorld, 1.0)
+	local inHand = giftWorld.entities[1] and giftWorld.entities[1].phase
+	RunFor(giftWorld, 3.5)
+	check("a gift waits, flies, lands and can then be taken", inHand == "waiting" and giftWorld.tokens == 1, tostring(inHand))
+
+	-- A bot gets through the zones whose twists change what's on the road.
+	for _, key in ipairs({ "barrens", "moonglade", "ironforge", "thunderbluff" }) do
+		local world = PlayBot(17, copy(Tuning), 110, nil, { "mulgore", key })
+		check("bot survives " .. key, not world.over, ("crashed into %s at %.1fs in zone %d"):format(tostring(world.crashRole), world.time, world.zoneIndex))
+	end
 end
 
 print(("%d of %d checks passed (%d seeds, %d minutes each, bot time %.1fs)"):format(total - failures, total, seedCount, minutes, os.clock() - clock))

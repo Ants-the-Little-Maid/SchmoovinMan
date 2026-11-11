@@ -29,6 +29,8 @@ local CRASH_TEXT = {
 	high = "Clotheslined by a high bar",
 	block = "Ran into a block",
 	wall = "Ran into a wall",
+	pitedge = "Fell into a pit",
+	vent = "Scorched by a lava vent",
 	tauren = "Trampled by a Schmoover",
 }
 
@@ -194,7 +196,7 @@ function Screens:BuildStart(layer)
 	-- Held to the panel's width, so the longer score line wraps.
 	footnote:SetPoint("RIGHT", powerups, "RIGHT")
 	footnote:SetJustifyH("LEFT")
-	footnote:SetText("Each new zone speeds you up. Score = tokens + time + jumps (+2), ducks (+3), Alliance joggers knocked over (+5) and bosses (+50 a spear, +500 driven off, +150 outlasted).")
+	footnote:SetText("Each new zone speeds you up. Score = tokens + time + jumps (+2), ducks (+3), Alliance joggers knocked over (+5), more for each in a combo, and bosses (+50 a spear, +500 driven off, +150 outlasted).")
 	self.footnote = footnote
 end
 
@@ -492,6 +494,10 @@ function Screens:ShowGameOver(world, entry, personalRank, guildRank, isBest, cra
 		cause = "Charged by " .. ChargerName(zone, crashName)
 	else
 		cause = CRASH_TEXT[world.crashRole] or "Run ended"
+		-- Ironforge's vents are steam.
+		if ns.Rules.IsSteam(ns.Tuning, world.crashRole, world.crashZoneKey or world.zoneKey) then
+			cause = "Scalded by a steam vent"
+		end
 	end
 	if world:InFight() then
 		self.crashText:SetText(string.format("%s in %s (zone %d), fighting %s.", cause, zoneName, world.zoneIndex, world.boss.name))
@@ -520,7 +526,7 @@ function Screens:ShowGameOver(world, entry, personalRank, guildRank, isBest, cra
 		self.bossLabel:SetText("Orc run: no bosses")
 		self.totalLabel:SetText(Candle(total))
 	else
-		self.moveLabel:SetText(string.format("Jumps %d, ducks %d, knocks %d", world.jumps or 0, world.ducks or 0, world.knocks or 0))
+		self.moveLabel:SetText(string.format("Jumps %d, ducks %d, knocks %d (best combo %d)", world.jumps or 0, world.ducks or 0, world.knocks or 0, world.bestCombo or 0))
 		self.bossLabel:SetText(string.format("Bosses: %d driven off, %d outlasted (%d spear%s)", world.bossesDriven or 0, world.bossesSurvived or 0, world.spearHits or 0, world.spearHits == 1 and "" or "s"))
 		self.totalLabel:SetText(total)
 	end

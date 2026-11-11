@@ -77,17 +77,31 @@ Rules.SHAPES = {
 	block = { halfWidth = 0.85, halfDepth = 0.8, bottom = 0, top = 4.0 },
 	wall = { halfWidth = 0.95, halfDepth = 0.6, bottom = 0, top = 4.0 },
 	charger = { halfWidth = 0.85, halfDepth = 1.2, bottom = 0, top = 3.0 },
+	-- A pit's edge in a lane with no ramp: run into it and you fall in. Too
+	-- wide a drop to jump. Its width and the ramp's leave no spot between them
+	-- (a lane is 2.6 across) and never overlap.
+	pitedge = { halfWidth = 0.7, halfDepth = 0.8, bottom = 0, top = 4.0 },
+	-- A ramp: not an obstacle. Touching it throws you over the pit (World:CheckRamp).
+	ramp = { halfWidth = 1.1, halfDepth = 0.8, bottom = 0, top = 4.0 },
+	-- A lava vent (Burning Steppes' twist): keep out of its lane, like a block.
+	vent = { halfWidth = 0.85, halfDepth = 0.8, bottom = 0, top = 4.0 },
 	-- Orc runs: a Tauren coming up from behind. Too tall to jump, nothing to
 	-- duck under: only a lane change gets out of its way.
 	tauren = { halfWidth = 0.8, halfDepth = 0.6, bottom = 0, top = 3.0 },
 }
 
-Rules.OBSTACLE = { low = true, high = true, block = true, wall = true, charger = true, tauren = true }
-Rules.TOKEN = { coin = true, gem = true }
+Rules.OBSTACLE = { low = true, high = true, block = true, wall = true, charger = true, tauren = true, pitedge = true, vent = true }
+Rules.TOKEN = { coin = true, gem = true, wisp = true }
 Rules.POWERUP = { windRider = true, magnet = true, shield = true, goldRush = true, stampede = true }
 
 -- What the runner must do to survive an obstacle in its lane.
-Rules.REQUIREMENT = { low = "jump", high = "duck", block = "avoid", wall = "avoid", charger = "avoid", tauren = "avoid" }
+Rules.REQUIREMENT = { low = "jump", high = "duck", block = "avoid", wall = "avoid", charger = "avoid", tauren = "avoid", pitedge = "avoid", vent = "avoid" }
+
+-- True for a steam vent: a vent met in a zone whose twist makes them steam.
+function Rules.IsSteam(tuning, role, zoneKey)
+	local twist = role == "vent" and tuning.twists and tuning.twists[zoneKey]
+	return twist and twist.steam or false
+end
 
 -- True when the runner (at x, feet at z, standing height) touches the obstacle
 -- at lateral position ex and distance ey.
@@ -118,6 +132,16 @@ function Rules.Score(tokenPoints, timePoints, movePoints, bossPoints, multiplier
 	return math.floor((tokenPoints + timePoints + (movePoints or 0) + (bossPoints or 0)) * (multiplier or 1))
 end
 
+-- What a move pays, as a multiple, when it's the `count`th of a combo: 1 for
+-- the first `every`, then `step` more for each further `every`, up to `max`.
+function Rules.ComboMultiplier(tuning, count)
+	local combo = tuning.combo
+	if not combo or count < 1 then
+		return 1
+	end
+	return math.min(combo.max, 1 + combo.step * math.floor((count - 1) / combo.every))
+end
+
 -- Spears it takes to drive off a boss met in this zone.
 function Rules.SpearsNeeded(tuning, zone)
 	local boss = tuning.boss
@@ -127,9 +151,11 @@ end
 -- Where a thrown hazard is, from its distance ahead (y) and your speed:
 -- "waiting" in the boss's hand, "flying" toward where it lands (with progress
 -- from 0 at the throw to 1 on landing) or "landed" on the road.
-function Rules.ThrowPhase(tuning, y, speed)
+-- throwMax: the furthest it's thrown from, where that isn't the boss's (an
+-- escort's gift).
+function Rules.ThrowPhase(tuning, y, speed, throwMax)
 	local boss = tuning.boss
-	local launch = math.min(boss.throwMax, speed * boss.throwLead)
+	local launch = math.min(throwMax or boss.throwMax, speed * boss.throwLead)
 	local land = math.min(launch * 0.7, speed * boss.landLead)
 	if y > launch then
 		return "waiting", 0

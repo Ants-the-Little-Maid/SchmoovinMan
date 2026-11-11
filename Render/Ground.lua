@@ -89,6 +89,8 @@ local DEFAULT_GROUND_TINT = { 0.85, 0.85, 0.85 }
 
 
 local VERTEX_UPPER_LEFT, VERTEX_LOWER_LEFT, VERTEX_UPPER_RIGHT, VERTEX_LOWER_RIGHT = 1, 2, 3, 4
+-- A soft four-pointed sparkle from the game's own art, for marks that glow.
+local GLOW_TEXTURE = "Interface\\Cooldown\\star4"
 
 local function Floor(value, step)
 	return math.floor(value / step) * step
@@ -146,6 +148,13 @@ function Ground.Create(scene, layer)
 		edge:Hide()
 		self.edges[index] = edge
 	end
+
+	-- A haze over the whole view for a sandstorm gust (see SetHaze).
+	self.haze = layer:CreateTexture(nil, "BACKGROUND", nil, 3)
+	self.haze:SetAllPoints()
+	self.haze:SetColorTexture(1, 1, 1, 1)
+	self.haze:Hide()
+	self.hazeAlpha = 0
 
 	-- A fog band over the horizon hides where the ground ends.
 	self.fogLow = layer:CreateTexture(nil, "BACKGROUND", nil, 2)
@@ -217,6 +226,21 @@ function Ground:SetZone(zone)
 	end
 end
 
+-- Hazes the sky and ground in a colour (a zone's fog), from 0 (none) up.
+-- Set again only when it has changed enough to see.
+function Ground:SetHaze(color, alpha)
+	if math.abs(alpha - self.hazeAlpha) < 0.01 and (alpha > 0 or self.hazeAlpha == 0) then
+		return
+	end
+	self.hazeAlpha = alpha
+	if alpha <= 0 then
+		self.haze:Hide()
+	else
+		self.haze:SetVertexColor(color[1], color[2], color[3], alpha)
+		self.haze:Show()
+	end
+end
+
 -- Where the road starts, in yards from the runner (negative is behind); nil
 -- for the usual place.
 function Ground:SetNear(y)
@@ -241,6 +265,22 @@ function Ground:Strip(texture, x1, x2, y1, y2)
 	local nlx, nly = scene:Project(x1, y1, 0)
 	local nrx, nry = scene:Project(x2, y1, 0)
 	local frx, fry = scene:Project(x2, y2, 0)
+	if flx and nlx and nrx and frx then
+		self:SetQuad(texture, flx, fly, nlx, nly, nrx, nry, frx, fry)
+		return true
+	end
+	texture:Hide()
+	return false
+end
+
+-- A mark with its corners anywhere in space: q holds far-left, near-left,
+-- near-right and far-right, each as x, y, z.
+function Ground:Quad(texture, q)
+	local scene = self.scene
+	local flx, fly = scene:Project(q[1], q[2], q[3])
+	local nlx, nly = scene:Project(q[4], q[5], q[6])
+	local nrx, nry = scene:Project(q[7], q[8], q[9])
+	local frx, fry = scene:Project(q[10], q[11], q[12])
 	if flx and nlx and nrx and frx then
 		self:SetQuad(texture, flx, fly, nlx, nly, nrx, nry, frx, fry)
 		return true
@@ -353,30 +393,73 @@ function Ground:DrawMarkings(distance)
 	end
 end
 
--- Red marks where a boss's throws will land: markers = { count, [i] = { x, y,
--- halfWidth, halfDepth, alpha [, r, g, b] } }, and the optional hazard markers
--- in their own colours. Drawn over the road, under the models.
+-- Everything drawn over the road and under the models, in order: markers =
+-- { count, [i] = marker }. A marker is a flat patch on the road ({ x, y,
+-- halfWidth, halfDepth }) or, with `quad`, four corners anywhere in space
+-- (`q`: a ramp's slope, a pit's walls, a plume of steam). Each has alpha and
+-- r, g, b. `fade` thins it out toward its far edge (its top, stood up);
+-- `glow` draws it as a soft sparkle that adds its light to what's behind.
+-- Red marks where a boss's throws land, hazard markers, pits and ramps.
 function Ground:DrawMarkers(markers)
-	self.markers = self.markers or {}
-	local textures = self.markers
+	-- Textures are shared out afresh each frame, from a pool for each kind
+	-- (plain, fading, glowing), so none ever has to change from one kind to
+	-- another. Fading and glowing ones (steam, wisps) lie over the plain ones.
+	local pools = self.markerPools
+	if not pools then
+		pools = { flat = {}, fade = {}, glow = {} }
+		self.markerPools = pools
+		self.markerUsed = {}
+	end
+	local used = self.markerUsed
+	used.flat, used.fade, used.glow = 0, 0, 0
 	local drawable = self.scene.calibrated
 	for index = 1, markers.count do
 		local marker = markers[index]
-		local texture = textures[index]
+		local kind = marker.glow and "glow" or marker.fade and "fade" or "flat"
+		local pool = pools[kind]
+		used[kind] = used[kind] + 1
+		local texture = pool[used[kind]]
 		if not texture then
-			texture = self.layer:CreateTexture(nil, "BACKGROUND", nil, -3)
+			texture = self.layer:CreateTexture(nil, "BACKGROUND", nil, kind == "flat" and -3 or -2)
 			texture:SetAllPoints()
-			texture:SetColorTexture(1, 1, 1, 1)
-			textures[index] = texture
+			if kind == "glow" then
+				texture:SetTexture(GLOW_TEXTURE)
+				texture:SetBlendMode("ADD")
+			else
+				texture:SetColorTexture(1, 1, 1, 1)
+			end
+			pool[used[kind]] = texture
 		end
+		local shown
 		if not drawable then
 			texture:Hide()
-		elseif self:Strip(texture, marker.x - marker.halfWidth, marker.x + marker.halfWidth, marker.y - marker.halfDepth, marker.y + marker.halfDepth) then
-			texture:SetVertexColor(marker.r or 0.88, marker.g or 0.21, marker.b or 0.16, marker.alpha)
+		elseif marker.quad then
+			shown = self:Quad(texture, marker.q)
+		else
+			shown = self:Strip(texture, marker.x - marker.halfWidth, marker.x + marker.halfWidth, marker.y - marker.halfDepth, marker.y + marker.halfDepth)
+		end
+		if shown then
+			local r, g, b = marker.r or 0.88, marker.g or 0.21, marker.b or 0.16
+			if marker.fade and CreateColor then
+				local from, to = self.fadeFrom, self.fadeTo
+				if not (from and from.SetRGBA) then
+					from, to = CreateColor(r, g, b, marker.alpha), CreateColor(r, g, b, 0)
+					self.fadeFrom, self.fadeTo = from, to
+				end
+				if from.SetRGBA then
+					from:SetRGBA(r, g, b, marker.alpha)
+					to:SetRGBA(r, g, b, 0)
+				end
+				texture:SetGradient("VERTICAL", from, to)
+			else
+				texture:SetVertexColor(r, g, b, marker.alpha)
+			end
 		end
 	end
-	for index = markers.count + 1, #textures do
-		textures[index]:Hide()
+	for kind, pool in pairs(pools) do
+		for index = used[kind] + 1, #pool do
+			pool[index]:Hide()
+		end
 	end
 end
 

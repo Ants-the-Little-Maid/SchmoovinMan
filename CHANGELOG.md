@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.12.0 (2026-11-12)
+
+- Combos: jumps, ducks, ramps and Alliance knocks in a row build a combo. Every five raise what a move pays (x1.5, x2, up to x3). Thick Hide breaking ends it. If you go six seconds without a move while there's something to do, it starts to run down by two every two seconds. The score panel shows it, and game over shows your best.
+- Pits: a new hazard from zone 2. A pit runs right across the road, two or three tiles long, with fire at the bottom and a wooden ramp at its edge in one or two lanes. Get to a ramp and it throws you over, through a line of coins; any other lane drops you in. Green arrows run up each ramp.
+- Zone twists: every zone but Mulgore now has a rule of its own, named on the zone banner.
+  - The Barrens: stampede country. Charging creatures turn up a zone sooner and more often, sometimes two abreast.
+  - Ashenvale: a trail of wisps shows one safe way through each group of hazards. They're worth a point each.
+  - Burning Steppes: lava vents on a glowing patch between hazards. Keep out of their lane.
+  - Silithus: sandstorm gusts that hide the road ahead for a few seconds.
+  - Un'Goro Crater: power-ups turn up about twice as often.
+  - Thousand Needles: a crosswind that drifts you sideways in the air.
+  - Winterspring: an icy road, where lane changes slide. Hazards are spaced further apart to allow for it.
+  - Westfall: Defias loot. More coin lines, and some coins are gems.
+  - Moonglade: jumps float higher and longer by moonlight. Hazards are spaced further apart to allow for it.
+  - Stormwind: crowded streets, with far more Alliance joggers to knock over.
+  - Darnassus: you're given Thick Hide on the way in.
+  - Ironforge: steam vents between hazards. Keep out of the steam.
+  - Thunder Bluff, Orgrimmar and Undercity: Cairne, Thrall or Sylvanas runs ahead of you beside the road and throws gifts back into your lanes, with a green mark where each will land: coins, and Stampede, Gold Rush or Thick Hide.
+
 ## 0.11.1 (2026-11-11)
 
 - Hazard markers: an Options setting (or `/schmoove markers`), off by default, that puts a coloured mark on the road under each hazard: amber to jump, blue to duck, red to keep clear.

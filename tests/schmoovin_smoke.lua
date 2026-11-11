@@ -986,5 +986,60 @@ do
 	Frames(0.05)
 	assert(C.renderer.markers.count == 0, "hazard marks still drawn after turning them off")
 end
+-- Things drawn by hand: a pit and its ramp, a steam vent, a wisp, and an
+-- escort with a gift in the air.
+do
+	local C = ns.Controller
+	local world = C.world
+	local r = C.renderer
+	world.entities = {}
+	world.cursor = 1e9
+	world.safeLeft = 1e9
+	local at = world.time + 2
+	local ramp = world:AddEntity("ramp", 1, at, 0)
+	ramp.leave = at + 1.5
+	world:AddEntity("pitedge", 3, at, 0)
+	local pit = world:AddEntity("pit", 2, at + 0.05, 0)
+	pit.leave = at + 1.5
+	Frames(0.05)
+	local quads = 0
+	for index = 1, r.markers.count do
+		quads = quads + (r.markers[index].quad and 1 or 0)
+	end
+	-- A ramp alone is two sides, a top, a lip and six arrow arms.
+	assert(quads >= 12, "pit and ramp not drawn in perspective: " .. quads)
+	assert(next(r.records) == nil, "a pit or ramp was given a model")
+
+	world.entities = {}
+	local vent = world:AddEntity("vent", 2, world.time + 2, 0)
+	vent.zoneKey = "ironforge"
+	world:AddEntity("wisp", 1, world.time + 2, 0.9)
+	Frames(0.05)
+	local fading, glowing = 0, 0
+	for index = 1, r.markers.count do
+		fading = fading + (r.markers[index].fade and 1 or 0)
+		glowing = glowing + (r.markers[index].glow and 1 or 0)
+	end
+	assert(fading == 4 and glowing == 2, ("steam and wisp not drawn: %d puffs, %d lights"):format(fading, glowing))
+	assert(next(r.records) == nil, "a steam vent or wisp was given a model")
+
+	world.entities = {}
+	world.zoneOrder[world.zoneIndex] = "orgrimmar"
+	world.zoneKey = "orgrimmar"
+	local gift = world:AddEntity("goldRush", 2, world.time + 1.2, 0.9)
+	gift.thrown, gift.gift, gift.phase, gift.throwMax = true, true, "waiting", ns.Tuning.escort.distance - 2
+	local flew = false
+	for _ = 1, 30 do
+		world.safeLeft = 1e9
+		Frames(1 / 60)
+		flew = flew or (gift.phase == "flying" and r.markers.count > 0 and r.markers[1].g > r.markers[1].r)
+	end
+	assert(r.escort and r.escort.name == "Thrall" and r.escortY, "no escort in Orgrimmar")
+	assert(flew, "a gift in the air has no green landing mark")
+	world.zoneOrder[world.zoneIndex] = "mulgore"
+	world.zoneKey = "mulgore"
+	Frames(2)
+	assert(r.escort == nil, "the escort stayed on after its zone")
+end
 print("templates used: " .. table.concat((function() local t = {} for k in pairs(templatesUsed) do t[#t + 1] = k end table.sort(t) return t end)(), ", "))
 print(("smoke ok: %d scores, guild board %d, %d messages sent, best %s"):format(#ns.db.scores, #ns.GuildBoard.List(), #sent, tostring(ns.db.scores[1].score)))

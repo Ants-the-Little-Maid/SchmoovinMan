@@ -57,6 +57,46 @@ local MARK_COLOR = {
 	duck = { 0.22, 0.54, 0.87 },
 	avoid = MARK_RED,
 }
+local MARK_GREEN = { 0.3, 0.85, 0.35 }
+-- Some things are drawn by hand, in perspective, with no model: on the road
+-- and under the models, whether or not hazard markers are on.
+-- A pit is a hole sunk PIT_DEPTH yards into the road: a pale rim, then as
+-- much of its inside as shows past the near edge from where the camera is
+-- (its far wall, its sides and a floor of fire with brighter bands).
+-- A ramp is a wooden slope RAMP.length yards long that rises RAMP.height to
+-- the pit's edge, with green arrows running up it.
+-- A lava vent is a model on a glow that pulses; a steam vent is a grate with
+-- a plume rising from it. A wisp is a soft light that bobs.
+-- PIT_PARTS: the pit's roles, which are always drawn this way.
+local PIT_DEPTH = 2.2
+local PIT_COLOR = { 0.04, 0.03, 0.02 }
+local PIT_RIM = { 0.95, 0.85, 0.55 }
+local PIT_WALL = { 0.36, 0.25, 0.16 }
+local PIT_SIDE = { 0.2, 0.14, 0.09 }
+local PIT_FLOOR = { 0.55, 0.1, 0.02 }
+local PIT_GLOW = { 1, 0.55, 0.1 }
+local RAMP = { length = 2.6, height = 1.3 }
+local RAMP_TOP = { 0.64, 0.46, 0.26 }
+local RAMP_SIDE = { 0.33, 0.22, 0.12 }
+local RAMP_EDGE = { 0.92, 0.82, 0.55 }
+local RAMP_ARROW = { 0.5, 1, 0.35 }
+local PIT_PARTS = { pit = true, pitedge = true, ramp = true }
+local VENT_COLOR = { 1, 0.42, 0.08 }
+local GRATE_COLOR = { 0.13, 0.13, 0.15 }
+local GRATE_BAR = { 0.5, 0.5, 0.55 }
+local STEAM_COLOR = { 0.96, 0.98, 1 }
+local WISP_COLOR = { 0.5, 1, 0.75 }
+local WISP_CORE = { 1, 1, 1 }
+-- An escort (a zone's twist): seconds it takes to come up from behind the
+-- fog and to run off ahead when its zone ends.
+local ESCORT_ARRIVE = 1.5
+local ESCORT_LEAVE = 1.5
+-- A lava vent: Burning Steppes' volcanic vent, then a lava pillar, then boulders.
+local VENT = {
+	{ fileID = 189270, name = "Lava vent" }, -- volcanicventlarge01.m2
+	{ fileID = 189158, name = "Lava pillar" }, -- lavapillar01.m2
+	{ fileID = 189212, name = "Boulders" }, -- boulders01.m2
+}
 -- How far a hazard marker reaches past its hazard, front and back, in yards.
 local MARK_MARGIN = 0.6
 -- How high a thrown hazard arcs, in yards.
@@ -140,6 +180,7 @@ local TARGET = {
 	block = { height = 2.0, width = 1.5, depth = 1.8 },
 	wall = { height = 2.2, width = 1.8, depth = 1.6 },
 	charger = { height = 2.3, width = 2.0 },
+	vent = { height = 2.0, width = 1.5, depth = 1.8 },
 }
 
 local CandidateKey = ns.Models.Key
@@ -196,6 +237,7 @@ function Renderer.Create(scene, ground)
 	self.sceneryDistance = 0
 	self.shots = {}
 	self.markers = { count = 0 }
+	self.ramps = {}
 	self.view = VIEWS.normal
 	return self
 end
@@ -463,6 +505,8 @@ function Renderer:ListFor(entity, zone)
 		return ns.Models.List(zone, role)
 	elseif role == "spear" then
 		return Assets.spear
+	elseif role == "vent" then
+		return VENT
 	elseif Assets.powerups[role] then
 		return Assets.powerups[role]
 	elseif role == "alliance" then
@@ -488,6 +532,15 @@ local function GroupKey(entity)
 	return (math.floor(entity.arrive * 1000 + 0.5) * 8 + GROUPED[entity.role]) * 8 + entity.lane
 end
 
+local function IsSteam(entity)
+	return ns.Rules.IsSteam(ns.Tuning, entity.role, entity.zoneKey)
+end
+
+-- True for what's drawn by hand, with no model.
+local function IsDrawn(entity)
+	return PIT_PARTS[entity.role] or entity.role == "wisp" or IsSteam(entity)
+end
+
 local function MarkGroups(entities)
 	wipe(groupAt)
 	for _, entity in ipairs(entities) do
@@ -508,13 +561,18 @@ end
 function Renderer:SyncEntities(world, zone, now)
 	local seen = self.seen
 	wipe(seen)
-	local far = zone.fog.far + 5
+	-- Nearer in a sandstorm gust (see Update).
+	local far = zone.fog.far + 5 - (self.fogPull or 0)
 	MarkGroups(world.entities)
 	local hazardMarkers = ns.db.settings.markers == true
+	local ramps = self.ramps
+	local rampCount = 0
 	for _, entity in ipairs(world.entities) do
 		seen[entity.id] = true
 		local record = self.records[entity.id]
-		if not record and entity.y < far + 20 then
+		-- A pit, its edges and ramps, a wisp and a steam vent have no model:
+		-- they're drawn by hand (below).
+		if not record and entity.y < far + 20 and not IsDrawn(entity) then
 			-- Each entity keeps the zone it spawned in.
 			entity.zoneKey = entity.zoneKey or world.zoneKey
 			record = self:NewRecord(self:ListFor(entity, ns.ZonesByKey[entity.zoneKey] or zone), entity.role, entity)
@@ -539,11 +597,32 @@ function Renderer:SyncEntities(world, zone, now)
 		end
 		-- A throw's landing mark doesn't wait for the hazard's model to load.
 		if entity.thrown and entity.phase == "flying" then
-			local _, progress = ns.Rules.ThrowPhase(ns.Tuning, entity.y, self.speed or 0)
+			local _, progress = ns.Rules.ThrowPhase(ns.Tuning, entity.y, self.speed or 0, entity.throwMax)
 			self:AddMarker(entity, entity.y, progress, far)
 		elseif hazardMarkers and entity.role ~= "tauren" and (not entity.thrown or entity.phase == "landed") then
 			self:AddHazardMarker(entity, far)
 		end
+		-- After any hazard marker, so they lie over it and it shows as a rim.
+		if entity.role == "pit" then
+			self:AddPit(entity, world, far, now)
+		elseif entity.role == "ramp" then
+			-- Ramps stand up over their pit's edge, so they're drawn after every pit.
+			rampCount = rampCount + 1
+			ramps[rampCount] = entity
+		elseif entity.role == "wisp" then
+			self:AddWisp(entity, far, now)
+		elseif entity.role == "vent" and not entity.smashed then
+			if IsSteam(entity) then
+				self:AddSteam(entity, far, now)
+			else
+				-- The width of the lane, so it shows round the vent standing on it.
+				self:AddGroundMark(entity, far, VENT_COLOR, 0.5 + 0.25 * math.sin(now * 6), 0.9, true)
+			end
+		end
+	end
+	for index = 1, rampCount do
+		self:AddRamp(ramps[index], world, far, now)
+		ramps[index] = nil
 	end
 	for id, record in pairs(self.records) do
 		if not seen[id] then
@@ -611,18 +690,27 @@ function Renderer:DrawEntity(record, entity, far, now)
 			return
 		elseif phase == "flying" then
 			landed = false
-			local _, progress = ns.Rules.ThrowPhase(ns.Tuning, y, self.speed or 0)
+			local _, progress = ns.Rules.ThrowPhase(ns.Tuning, y, self.speed or 0, entity.throwMax)
 			progress = math.max(record.throwProgress or 0, progress)
 			record.throwProgress = progress
 			if not record.launched then
 				-- It leaves from where the boss is now, and keeps that start
 				-- while the boss moves on to its next throw or runs off.
 				record.launched = true
-				-- Before the boss is drawn (its model still loading), from its spot.
-				record.fromX = self.bossAimX or x
-				record.fromY = self.bossY or ns.Tuning.boss.distance
-				record.fromZ = self.bossHandZ or 3
-				self.bossThrowAt = now
+				if entity.gift then
+					-- A gift comes from the escort beside the road.
+					-- (Before it's drawn, its model still loading, from its spot.)
+					record.fromX = self.escortX or (self.escort and self.escort.side or 1) * (RoadHalf() + 1.4)
+					record.fromY = self.escortY or ns.Tuning.escort.distance
+					record.fromZ = self.escortHandZ or 2
+					self.escortThrowAt = now
+				else
+					-- Before the boss is drawn (its model still loading), from its spot.
+					record.fromX = self.bossAimX or x
+					record.fromY = self.bossY or ns.Tuning.boss.distance
+					record.fromZ = self.bossHandZ or 3
+					self.bossThrowAt = now
+				end
 			end
 			local fromX, fromY, fromZ = record.fromX, record.fromY, record.fromZ
 			x = fromX + (x - fromX) * progress
@@ -674,7 +762,8 @@ end
 
 -- A red mark on the road where a thrown hazard will land, as wide as the
 -- hazard's lane and stronger as it falls.
-function Renderer:AddMarker(entity, y, progress, far)
+-- The next mark to draw on the road this frame (reused from frame to frame).
+function Renderer:NextMarker(x, y, halfWidth, halfDepth, alpha, color)
 	local markers = self.markers
 	markers.count = markers.count + 1
 	local marker = markers[markers.count]
@@ -682,13 +771,41 @@ function Renderer:AddMarker(entity, y, progress, far)
 		marker = {}
 		markers[markers.count] = marker
 	end
+	marker.x, marker.y = x, y
+	marker.halfWidth, marker.halfDepth = halfWidth, halfDepth
+	marker.alpha = alpha
+	marker.r, marker.g, marker.b = color[1], color[2], color[3]
+	marker.quad, marker.fade, marker.glow = nil, nil, nil
+	return marker
+end
+
+-- The next mark, with its four corners anywhere in space: far-left,
+-- near-left, near-right and far-right, each x, y, z (a ramp's slope, a pit's
+-- walls). Returns it, so the caller can set `fade` or `glow` on it.
+function Renderer:NextQuad(alpha, color, x1, y1, z1, x2, y2, z2, x3, y3, z3, x4, y4, z4)
+	local marker = self:NextMarker(0, 0, 0, 0, alpha, color)
+	local q = marker.q
+	if not q then
+		q = {}
+		marker.q = q
+	end
+	q[1], q[2], q[3], q[4], q[5], q[6] = x1, y1, z1, x2, y2, z2
+	q[7], q[8], q[9], q[10], q[11], q[12] = x3, y3, z3, x4, y4, z4
+	marker.quad = true
+	return marker
+end
+
+-- Half the width of a mark that fills an entity's lane. Side by side, the
+-- marks of one barrier meet, as its pieces do.
+local function LaneHalfWidth(entity)
 	local lanes = ns.Tuning.lanes
-	marker.x = entity.x
-	marker.y = y
-	marker.halfWidth = (lanes[2] - lanes[1]) * 0.42
-	marker.halfDepth = 0.9
-	marker.alpha = (0.35 + 0.3 * progress) * Fade(y, far)
-	marker.r, marker.g, marker.b = MARK_RED[1], MARK_RED[2], MARK_RED[3]
+	return (lanes[2] - lanes[1]) * ((entity.joinLeft or entity.joinRight) and 0.5 or 0.46)
+end
+
+function Renderer:AddMarker(entity, y, progress, far)
+	local lanes = ns.Tuning.lanes
+	-- Green for an escort's gift, which is good to stand on.
+	self:NextMarker(entity.x, y, (lanes[2] - lanes[1]) * 0.42, 0.9, (0.35 + 0.3 * progress) * Fade(y, far), entity.gift and MARK_GREEN or MARK_RED)
 end
 
 -- Hazard markers (an Options setting, off by default): a mark on the road
@@ -706,22 +823,144 @@ function Renderer:AddHazardMarker(entity, far)
 	if y < -halfDepth or y > far then
 		return
 	end
-	local markers = self.markers
-	markers.count = markers.count + 1
-	local marker = markers[markers.count]
-	if not marker then
-		marker = {}
-		markers[markers.count] = marker
+	self:NextMarker(entity.x, y, LaneHalfWidth(entity), halfDepth, 0.6 * Fade(y, far), color)
+end
+
+-- A pit: right across the road from its near edge to its far one, as much of
+-- it as is in view. A pale rim first, so the hole shows on a dark road too,
+-- then the opening, then what shows of its inside. Looking down past the
+-- near edge, the floor comes into sight `reach` yards in; on a pit still far
+-- off that's past its far edge, and only the top of the far wall shows.
+function Renderer:AddPit(entity, world, far, now)
+	local near = math.max(entity.y, self.view.behind)
+	local trueFar = (entity.leave - world.time) * world.speed
+	local farEdge = math.min(trueFar, far)
+	local length = farEdge - near
+	if length < 0.5 then
+		return
 	end
-	local lanes = ns.Tuning.lanes
-	-- Side by side, the marks of one barrier meet, as its pieces do.
-	local joined = entity.joinLeft or entity.joinRight
-	marker.x = entity.x
-	marker.halfWidth = (lanes[2] - lanes[1]) * (joined and 0.5 or 0.46)
-	marker.halfDepth = halfDepth
-	marker.y = y
-	marker.alpha = 0.6 * Fade(y, far)
-	marker.r, marker.g, marker.b = color[1], color[2], color[3]
+	local middle, half = (near + farEdge) / 2, length / 2
+	local road = RoadHalf()
+	local fade = Fade(middle, far)
+	self:NextMarker(0, middle, road + 0.35, half + 0.35, 0.85 * fade, PIT_RIM)
+	self:NextMarker(0, middle, road, half, fade, PIT_COLOR)
+	local _, cameraY, cameraZ = self.scene.frame:GetCameraPosition()
+	if not cameraZ or cameraZ < 0.5 or near - cameraY < 0.5 then
+		return
+	end
+	local reach = (near - cameraY) * PIT_DEPTH / cameraZ
+	local depth, floorFrom = PIT_DEPTH, near + reach
+	if reach >= length then
+		depth, floorFrom = PIT_DEPTH * length / reach, farEdge
+	end
+	if floorFrom < farEdge - 0.3 then
+		self:NextQuad(fade, PIT_FLOOR, -road, farEdge, -depth, -road, floorFrom, -depth, road, floorFrom, -depth, road, farEdge, -depth)
+		-- Brighter bands across the fire, fixed to the road so they stream by.
+		local band, y = 0, entity.y + 3
+		while y < farEdge - 0.6 and band < 12 do
+			if y > floorFrom + 0.6 then
+				local glow = (0.4 + 0.3 * math.sin(now * 4 + band * 1.7)) * fade
+				self:NextQuad(glow, PIT_GLOW, -road * 0.9, y + 0.5, -depth, -road * 0.9, y - 0.5, -depth, road * 0.9, y - 0.5, -depth, road * 0.9, y + 0.5, -depth)
+			end
+			band, y = band + 1, y + 5
+		end
+	end
+	self:NextQuad(fade, PIT_SIDE, -road, farEdge, 0, -road, near, 0, -road, floorFrom, -depth, -road, farEdge, -depth)
+	self:NextQuad(fade, PIT_SIDE, road, farEdge, 0, road, near, 0, road, floorFrom, -depth, road, farEdge, -depth)
+	-- The far wall, once the pit's far edge is out of the fog.
+	if trueFar <= far then
+		self:NextQuad(fade, PIT_WALL, -road, farEdge, 0, -road, farEdge, -depth, road, farEdge, -depth, road, farEdge, 0)
+	end
+end
+
+-- A ramp: a slope the width of its lane, rising to the pit's edge. Its two
+-- sides go down first (whichever faces away is hidden under the top), then
+-- the top with a pale edge at its lip, then arrows that run up it and fade
+-- in and out at its ends.
+function Renderer:AddRamp(entity, world, far, now)
+	-- Its top is the pit's near edge, wherever that is at your speed now.
+	local top = entity.near and (entity.near - world.time) * world.speed or entity.y + ns.Tuning.pit.lead
+	local foot = top - RAMP.length
+	if foot > far or top < self.view.behind then
+		return
+	end
+	local fade = Fade(top, far)
+	local x, height, length = entity.x, RAMP.height, RAMP.length
+	local half = ns.Rules.SHAPES.ramp.halfWidth
+	local left, right = x - half, x + half
+	self:NextQuad(fade, RAMP_SIDE, left, top, height, left, foot, 0, left, foot, 0, left, top, 0)
+	self:NextQuad(fade, RAMP_SIDE, right, top, height, right, foot, 0, right, foot, 0, right, top, 0)
+	self:NextQuad(fade, RAMP_TOP, left, top, height, left, foot, 0, right, foot, 0, right, top, height)
+	local lip = top - 0.12 * length
+	self:NextQuad(fade, RAMP_EDGE, left, top, height, left, lip, height * 0.88, right, lip, height * 0.88, right, top, height)
+	-- An arrow is two arms that meet at its point, up the slope: each a
+	-- slanted band `thick` of the slope long, its outer end `arm` behind the point.
+	local arm, thick, wide = 0.2, 0.13, half * 0.7
+	for index = 0, 2 do
+		local phase = (now * 0.8 + index / 3) % 1
+		local alpha = fade * math.min(1, 4 * phase, 4 * (1 - phase))
+		local tail = phase * (0.86 - arm - thick)
+		local y1, z1 = foot + tail * length, tail * height
+		local y2, z2 = foot + (tail + thick) * length, (tail + thick) * height
+		local y3, z3 = foot + (tail + arm) * length, (tail + arm) * height
+		local y4, z4 = foot + (tail + arm + thick) * length, (tail + arm + thick) * height
+		self:NextQuad(alpha, RAMP_ARROW, x - wide, y2, z2, x - wide, y1, z1, x, y3, z3, x, y4, z4)
+		self:NextQuad(alpha, RAMP_ARROW, x, y4, z4, x, y3, z3, x + wide, y1, z1, x + wide, y2, z2)
+	end
+end
+
+-- A steam vent: a grate the width of its lane with three bars, and a plume
+-- of puffs that rise from it, widening and thinning as they go.
+function Renderer:AddSteam(entity, far, now)
+	local x, y = entity.x, entity.y
+	if y > far or y < self.view.behind then
+		return
+	end
+	local fade = Fade(y, far)
+	self:NextMarker(x, y, 0.95, 0.95, 0.9 * fade, GRATE_COLOR)
+	for bar = -1, 1 do
+		self:NextMarker(x + bar * 0.55, y, 0.1, 0.8, 0.9 * fade, GRATE_BAR)
+	end
+	for index = 0, 3 do
+		local phase = (now * 0.8 + index / 4 + entity.id * 0.37) % 1
+		local bottom, half = phase * 3, 0.4 + 0.55 * phase
+		local puff = self:NextQuad((1 - phase) * 0.8 * fade, STEAM_COLOR,
+			x - half, y, bottom + 1.3, x - half, y, bottom, x + half, y, bottom, x + half, y, bottom + 1.3)
+		puff.fade = true
+	end
+end
+
+-- A wisp: a soft green light with a white heart, bobbing and pulsing, stood
+-- up to face you.
+function Renderer:AddWisp(entity, far, now)
+	local x, y = entity.x, entity.y
+	if y > far or y < self.view.behind then
+		return
+	end
+	local fade = Fade(y, far)
+	local z = entity.z + 0.15 * math.sin(now * 3 + entity.id)
+	local size = 0.8 + 0.12 * math.sin(now * 7 + entity.id * 1.3)
+	local light = self:NextQuad(0.9 * fade, WISP_COLOR, x - size, y, z + size, x - size, y, z - size, x + size, y, z - size, x + size, y, z + size)
+	light.glow = true
+	size = size * 0.45
+	local heart = self:NextQuad(fade, WISP_CORE, x - size, y, z + size, x - size, y, z - size, x + size, y, z - size, x + size, y, z + size)
+	heart.glow = true
+end
+
+-- A patch on the road under an entity: as wide as its hit box, or with
+-- `wide` (and for the pieces of one barrier, which meet) as its lane, and
+-- `margin` yards longer than its hit box front and back.
+function Renderer:AddGroundMark(entity, far, color, alpha, margin, wide)
+	local shape = ns.Rules.SHAPES[entity.role]
+	local y = entity.y
+	if not shape or y > far then
+		return
+	end
+	local halfWidth = LaneHalfWidth(entity)
+	if not wide and not (entity.joinLeft or entity.joinRight) then
+		halfWidth = shape.halfWidth
+	end
+	self:NextMarker(entity.x, y, halfWidth, shape.halfDepth + margin, alpha * Fade(y, far), color)
 end
 
 -- Boss ------------------------------------------------------------------------------
@@ -800,7 +1039,7 @@ function Renderer:DrawBoss(world, far, now)
 	-- Toward the lane of the next hazard still in its hand.
 	local targetX, nearest = 0, nil
 	for _, entity in ipairs(world.entities) do
-		if entity.thrown and entity.phase == "waiting" and (not nearest or entity.y < nearest) then
+		if entity.thrown and not entity.gift and entity.phase == "waiting" and (not nearest or entity.y < nearest) then
 			nearest = entity.y
 			targetX = entity.x
 		end
@@ -841,6 +1080,81 @@ function Renderer:DrawBoss(world, far, now)
 	record.actor:SetAlpha(alpha * Fade(y, far))
 end
 
+-- Escort ----------------------------------------------------------------------------
+
+-- The model list of a famous face (Assets.joggers) by name.
+local function EscortList(name)
+	for _, list in ipairs(Assets.joggers) do
+		if list.name == name then
+			return list
+		end
+	end
+	return Assets.joggers[1]
+end
+
+function Renderer:FreeEscort()
+	if self.escort then
+		self:FreeRecord(self.escort)
+		self.escort = nil
+	end
+	self.escortX, self.escortY, self.escortHandZ, self.escortThrowAt = nil, nil, nil, nil
+end
+
+-- A zone whose twist is an escort: a famous face runs ahead of you beside
+-- the road, throwing gifts back into your lanes. It comes up out of the fog
+-- when the zone starts and runs off ahead when it ends.
+function Renderer:DrawEscort(world, far, now)
+	local twist = world.Twist and world:Twist()
+	local name = twist and twist.escort or nil
+	local record = self.escort
+	if record and record.name ~= name and not record.leftAt then
+		record.leftAt = now
+	end
+	if record and record.leftAt and now - record.leftAt > ESCORT_LEAVE then
+		self:FreeEscort()
+		record = nil
+	end
+	if not record and name then
+		record = self:NewRecord(EscortList(name), "jogger")
+		if record then
+			record.name = name
+			record.cameAt = now
+			record.side = math.random() < 0.5 and -1 or 1
+			self.escort = record
+		end
+	end
+	if not record then
+		return
+	end
+	self:CheckLoaded(record)
+	if not record.ready then
+		record.actor:SetAlpha(0)
+		return
+	end
+	local distance = ns.Tuning.escort.distance
+	local y, alpha = distance, 1
+	if record.leftAt then
+		local left = now - record.leftAt
+		y = distance + 16 * left
+		alpha = 1 - left / ESCORT_LEAVE
+	elseif now - record.cameAt < ESCORT_ARRIVE then
+		local still = 1 - (now - record.cameAt) / ESCORT_ARRIVE
+		y = distance + 30 * still * still
+	end
+	-- A throw is an attack swing, then back to running.
+	local anim = (self.escortThrowAt and now - self.escortThrowAt < 0.5) and "bossThrow" or "run"
+	if record.anim ~= anim then
+		record.anim = anim
+		record.actor:SetAnimation(Assets.anims[anim][1], nil, 1.1)
+	end
+	local scale, zOffset = self:Fit(record)
+	local x = record.side * (RoadHalf() + 1.4)
+	self.scene:Place(record.actor, x, y, zOffset, HALF_PI, scale)
+	record.actor:SetAlpha(alpha * Fade(y, far))
+	-- Where gifts leave from.
+	self.escortX, self.escortY, self.escortHandZ = x, y, Assets.joggerHeight * 0.75
+end
+
 -- How far the view has moved to the fight camera, from 0 to 1 (eased): it
 -- moves over while a boss is here and back once it's gone.
 function Renderer:UpdateFightView(now)
@@ -868,6 +1182,8 @@ function Renderer:UpdateFog(zone, fight)
 	elseif fight > 0 then
 		lift = fight * math.max(0, FightCameraToBoss() - fog.near - BOSS_FOG * (fog.far - fog.near))
 	end
+	-- A sandstorm gust pulls it in.
+	lift = lift - (self.fogPull or 0)
 	if lift ~= (self.fogLift or 0) then
 		self.fogLift = lift
 		self.scene:SetFog(fog, lift)
@@ -1072,7 +1388,7 @@ function Renderer:UpdateScenery(world, zone)
 					record.x = OffRoad(record.x, self.bounds[record.key], record.yaw, scale)
 				end
 				self.scene:Place(record.actor, record.x, record.y, zOffset, record.yaw, scale)
-				record.actor:SetAlpha(Fade(record.y, far))
+				record.actor:SetAlpha(Fade(record.y, far - (self.fogPull or 0)))
 			else
 				record.actor:SetAlpha(0)
 			end
@@ -1142,7 +1458,7 @@ function Renderer:UpdateJoggers(world, zone, moved, now)
 					record.animated = true
 				end
 				self.scene:Place(record.actor, record.x, record.y, zOffset, HALF_PI, scale)
-				record.actor:SetAlpha(Fade(record.y, far))
+				record.actor:SetAlpha(Fade(record.y, far - (self.fogPull or 0)))
 			else
 				record.actor:SetAlpha(0)
 			end
@@ -1240,6 +1556,7 @@ function Renderer:Reset(mode)
 	self.joggerDistance = nil
 	self:Dismount()
 	self:FreeBoss()
+	self:FreeEscort()
 	self.fightView = 0
 	self.fogLift = 0
 	-- The camera starts each run in place, not still easing down from the
@@ -1265,6 +1582,19 @@ function Renderer:Update(world, now)
 		self.scene:Calibrate()
 	end
 	local fight = self:UpdateFightView(now)
+	-- A zone with sandstorm gusts (its twist): every gustEvery seconds one
+	-- blows for gustLength, easing in and out over a second, pulling the fog
+	-- in by gustPull of its range and hazing the view. It follows the run's
+	-- clock, so it holds still while paused, and it dies down as the view
+	-- moves to a boss fight, where the fog must stay off the boss.
+	local twist = world.Twist and world:Twist()
+	local gust = 0
+	if twist and twist.gustEvery then
+		local into = world.time % twist.gustEvery
+		gust = math.max(0, math.min(1, into, twist.gustLength - into)) * (1 - fight)
+	end
+	self.fogPull = gust * (twist and twist.gustPull or 0) * zone.fog.far
+	self.ground:SetHaze(zone.fog.color, gust * 0.4)
 	local base = self.view.camera
 	-- Camera eases toward the runner's lane and rises in flight. The shares
 	-- are those of one frame at 60 a second, scaled by the time that passed,
@@ -1285,6 +1615,7 @@ function Renderer:Update(world, now)
 	self.taurenSpeed = world.taurenSpeed
 	self.markers.count = 0
 	self:DrawBoss(world, zone.fog.far + 5, now)
+	self:DrawEscort(world, zone.fog.far + 5, now)
 	self:UpdateFog(zone, fight)
 	self:DrawShots(now)
 	self:SyncEntities(world, zone, now)

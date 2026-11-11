@@ -24,21 +24,29 @@ Fields:
   zoneIndex, zoneKey, zoneStart (course time the current zone began)
   score, tokenPoints, timePoints, movePoints, bossPoints, tokens, gems, jumps,
       ducks, knocks, dodges, spearHits, bossesDriven, bossesSurvived
+  combo (clean moves in a row: jumps, ducks and knocks), bestCombo
   powerups = { windRider = left, magnet = left, goldRush = left, stampede = left }
   shield (bool), safeLeft (seconds of no-hit after a shield break or landing)
   runner = { lane, x, z, state, flying }   state: run | jump | duck | fly | crash
   boss = nil, or the latest fight: { key, name, zone, start, ends, needed, hits,
       state = "fight" | "driven" | "survived", endedAt }
   entities = array of { id, role, lane, x, y, z, arrive, magnet, smashed, knocked, thrown }
-      role: low | high | block | wall | charger | coin | gem | alliance | spear |
+      role: low | high | block | wall | charger | vent | pit | pitedge | ramp | coin | gem |
+            wisp | alliance | spear |
             windRider | magnet | shield | goldRush | stampede | tauren
       tauren: orc runs only, a Tauren coming up from behind (y below 0) and
             on past you; arrive is when it draws level
       alliance: an Alliance jogger in a lane, jogging away from you; knocked
             (and worth points) when you run into it, never a hazard
+      pit: a hole right across the road from arrive to leave (both run times),
+            drawn only; pitedge: its edge in a lane with no ramp, which is what
+            you fall in at; ramp: throws you over it (near, leave: the run
+            times of the pit's near and far edges)
       thrown: a hazard the boss throws, with phase "waiting" (in its hand),
             "flying" or "landed" (see Rules.ThrowPhase; it only ever moves on);
             spear: a boss-only pickup that's thrown at the boss when you grab it
+      gift: a coin or power-up an escort throws (thrown too, from throwMax
+            yards at most); it can be taken once it has landed
   over (bool), crashRole, crashZoneKey
 
 Events ({ type = ..., ... }):
@@ -47,7 +55,7 @@ Events ({ type = ..., ... }):
   knock {points} (ran into an Alliance jogger), dodge {points} (a Tauren got past),
   bossStart {name, needed, limit}, spear {hits, needed, points},
   bossEnd {result = "driven" | "survived", name, points},
-  crash {role}, shieldBreak {role}, smash {role}, jump, duck, land, lane
+  comboEnd {count}, crash {role}, shieldBreak {role}, smash {role}, jump, duck, land, lane
 ]]
 
 local World = {}
@@ -61,13 +69,15 @@ World.DEFAULT_ZONES = {
 	"westfall", "moonglade", "stormwind", "darnassus", "ironforge", "thunderbluff", "orgrimmar", "undercity",
 }
 
-local CODE_ROLE = { L = "low", H = "high", B = "block", W = "wall", C = "charger", c = "coin", a = "coin", g = "gem" }
+local CODE_ROLE = { L = "low", H = "high", B = "block", W = "wall", C = "charger", R = "ramp", X = "pitedge", c = "coin", a = "coin", g = "gem" }
 local GROUND_TOKEN_Z = 0.9
 local AIR_TOKEN_Z = 2.2
 -- What a boss throws for each pattern code: hazards only, and a charging
 -- creature becomes a block (it can't be thrown; a block asks the same of you).
 local BOSS_CODE = { L = "L", A = "L", H = "H", B = "B", W = "W", C = "B" }
 local NEVER = -1000
+-- What a combo can be kept up on (with Alliance joggers).
+local MOVE_ROLE = { low = true, high = true, ramp = true, alliance = true }
 
 function World.New(seed, tuning, options)
 	options = options or {}
@@ -107,6 +117,8 @@ function World.New(seed, tuning, options)
 	self.skyNext = 0
 	self.skyLane = 2
 	self.over = false
+	-- Combo: clean moves in a row, the longest this run, and when the last was.
+	self.combo, self.bestCombo, self.comboAt = 0, 0, 0
 
 	if options.mode == "orc" then
 		self.mode = "orc"
@@ -121,6 +133,89 @@ function World.New(seed, tuning, options)
 		self.bossZone = self:FindBossZone(self.rng:Int(first[1], first[2]))
 	end
 	return self
+end
+
+-- The current zone's twist (Tuning.twists), or nil.
+function World:Twist()
+	return self:TwistFor(self.zoneIndex)
+end
+
+-- The twist of a zone number (Tuning.twists), or nil. An orc run has none.
+function World:TwistFor(zone)
+	local twists = self.tuning.twists
+	if self.mode == "orc" or not twists then
+		return nil
+	end
+	return twists[self:ZoneKey(zone)]
+end
+
+-- Row spacing and the gap between chunks for a zone number, stretched by
+-- that zone's twist if it has one (ice, moonlight: see Tuning.twists).
+function World:Spacing(zone)
+	local twist = self:TwistFor(zone)
+	local stretch = twist and twist.spacing or 1
+	-- Also the stretch itself and the zone's lane-change time, if not the usual.
+	return Rules.Tempo(self.tuning, zone) * stretch, Rules.Gap(self.tuning, zone) * stretch, stretch, twist and twist.laneChange or nil
+end
+
+-- Counts a clean move into the combo and returns what it pays: its points
+-- times the combo's multiplier, rounded.
+function World:ComboPoints(points)
+	self.combo = self.combo + 1
+	self.comboAt = self.time
+	if self.combo > self.bestCombo then
+		self.bestCombo = self.combo
+	end
+	return math.floor(points * Rules.ComboMultiplier(self.tuning, self.combo) + 0.5)
+end
+
+function World:BreakCombo()
+	if self.combo > 0 then
+		self:Emit({ type = "comboEnd", count = self.combo })
+		self.combo = 0
+	end
+end
+
+-- Runs a combo down when it's left too long without a move. Time with
+-- nothing to do doesn't count against it: on a Wind Rider, or with no move ahead.
+function World:UpdateCombo(h)
+	local combo = self.tuning.combo
+	if self.combo == 0 or not combo then
+		return
+	end
+	-- The clock only runs while there's something ahead to jump, duck, ride
+	-- or knock (movesAhead, from the last step): not through the clear road
+	-- before a boss or at a zone change, nor a stretch of blocks and coins.
+	if self.runner.flying or not self.movesAhead then
+		self.comboAt = self.comboAt + h
+	elseif self.time - self.comboAt > combo.timeout then
+		-- Left too long, it runs down a little at a time rather than ending.
+		self.comboAt = self.comboAt + combo.decayEvery
+		local left = self.combo - combo.decay
+		if left > 0 then
+			self.combo = left
+		else
+			self:BreakCombo()
+		end
+	end
+end
+
+-- Sets the runner up for the zone's twist: slower lane changes on ice,
+-- floaty jumps by moonlight, and a crosswind that turns round every
+-- driftEvery seconds.
+function World:ApplyTwist()
+	local twist = self:Twist()
+	local runner = self.runner
+	runner.laneChangeTime = twist and twist.laneChange or nil
+	runner.gravity = twist and twist.gravity or nil
+	runner.jumpSpeed = twist and twist.jumpSpeed or nil
+	local drift = 0
+	if twist and twist.drift then
+		-- By run time, not the zone clock, so it still turns in a boss fight.
+		local turn = math.floor(self.time / twist.driftEvery)
+		drift = (turn % 2 == 0) and twist.drift or -twist.drift
+	end
+	runner.drift = drift
 end
 
 -- Speed shown at a zone-clock time: yours, or in an orc run the Tauren's.
@@ -302,7 +397,7 @@ function World:EndBoss(result)
 		local keep = true
 		if entity.role == "spear" then
 			keep = false
-		elseif entity.thrown then
+		elseif entity.thrown and not entity.gift then
 			if entity.phase == "waiting" then
 				keep = false
 			else
@@ -322,7 +417,8 @@ function World:EndBoss(result)
 
 	-- Ordinary chunks start again after the last hazard still coming, and far
 	-- enough ahead to come out of the fog like any other.
-	self.cursor = math.max(self.time + tuning.spawnAhead / self.speed, last + Rules.Gap(tuning, boss.zone))
+	local _, bossGap = self:Spacing(boss.zone)
+	self.cursor = math.max(self.time + tuning.spawnAhead / self.speed, last + bossGap)
 	self.bossFull = nil
 	local every = tuning.boss.every
 	self.bossZone = self:FindBossZone(boss.zone + self.rng:Int(every[1], every[2]))
@@ -405,15 +501,16 @@ end
 
 -- Pattern codes an Alliance jogger mustn't run through.
 local SOLID = { L = true, H = true, B = true, W = true, C = true, A = true }
-local SOLID_ROLE = { low = true, high = true, block = true, wall = true, charger = true }
+local SOLID_ROLE = { low = true, high = true, block = true, wall = true, charger = true, vent = true }
 
 -- Sometimes an Alliance jogger jogs into the gap after a chunk. They move
 -- away from you, so before you reach them they cover part of the track ahead:
 -- only a lane with nothing solid along that stretch is used, so they never
 -- run through a hazard. `items` are the chunk just placed, from `start`.
-function World:SpawnAlliance(items, start, arrive, zone)
+-- chance: the zone's own, where its twist sets one (crowded streets).
+function World:SpawnAlliance(items, start, arrive, zone, chance)
 	local alliance = self.tuning.alliance
-	if not alliance or zone < alliance.minZone or self.rng:Next() >= alliance.chance then
+	if not alliance or zone < alliance.minZone or self.rng:Next() >= (chance or alliance.chance) then
 		return
 	end
 	-- Anything arriving from `from` on lies on the stretch they jog over.
@@ -455,16 +552,19 @@ end
 -- the chunk: a lane with nothing solid close by, from which every later row
 -- can still be passed. `hazards` are the chunk's items at run times, sorted.
 function World:SpearSafe(hazards, lane, at)
+	-- On ice the margins stretch as the rows do, and the check allows for
+	-- the slower lane change (both set by SpawnBossChunk).
+	local near = 0.45 * (self.spearStretch or 1)
 	local later = {}
 	for _, item in ipairs(hazards) do
-		if item.lane == lane and math.abs(item.t - at) < 0.45 then
+		if item.lane == lane and math.abs(item.t - at) < near then
 			return false
 		end
 		if item.t > at then
 			later[#later + 1] = item
 		end
 	end
-	return (Patterns.Feasible(later, self.tuning, { { lane = lane, t = at, jump = NEVER, duck = NEVER } }))
+	return (Patterns.Feasible(later, self.tuning, { { lane = lane, t = at, jump = NEVER, duck = NEVER } }, self.spearLaneTime))
 end
 
 -- Places up to `count` spears spread between `from` and `to` (searching back
@@ -514,10 +614,11 @@ function World:SpawnBossChunk(zone, ends)
 		return false
 	end
 	-- A pattern with hazards that ends before the boss gives up.
-	local tempo = Rules.Tempo(tuning, zone)
+	local tempo, gap, stretch, laneTime = self:Spacing(zone)
+	self.spearStretch, self.spearLaneTime = stretch, laneTime
 	local room = ends - tuning.zoneBreather - self.cursor
 	local pattern, mirrored = Patterns.Pick(self.rng, zone, tuning.duckEnabled, function(item)
-		return Patterns.HasHazard(item) and Patterns.Duration(item, tempo) <= room
+		return Patterns.HasHazard(item) and not item.pit and Patterns.Duration(item, tempo) <= room
 	end)
 	if not pattern then
 		-- None fits: no more throws this fight.
@@ -544,8 +645,7 @@ function World:SpawnBossChunk(zone, ends)
 	-- Spears: spearSupply times those needed over the fight, shared out over
 	-- the throws still to come (a little ahead, so none are left over), and
 	-- placed up to 0.6 s before the next chunk so any lane can be reached for
-	-- it, and no nearer than 0.45 s after the last one.
-	local gap = Rules.Gap(tuning, zone)
+	-- it, and no nearer than 0.45 s after the last one (both longer on ice).
 	local plan = self.spearPlan
 	if not plan or plan.zone ~= zone then
 		plan = { zone = zone, left = math.ceil(Rules.SpearsNeeded(tuning, zone) * tuning.boss.spearSupply) }
@@ -554,10 +654,74 @@ function World:SpawnBossChunk(zone, ends)
 	local window = duration + gap
 	local remaining = math.max(window, ends - tuning.zoneBreather - self.cursor)
 	local count = math.min(plan.left, math.ceil(plan.left * window / remaining))
-	local earliest = self.cursor - math.max(0, gap - 0.45)
-	plan.left = plan.left - self:PlaceSpears(hazards, self.cursor, self.cursor + duration + math.max(0, gap - 0.6), count, earliest)
+	local earliest = self.cursor - math.max(0, gap - 0.45 * stretch)
+	plan.left = plan.left - self:PlaceSpears(hazards, self.cursor, self.cursor + duration + math.max(0, gap - 0.6 * stretch), count, earliest)
 	self.cursor = self.cursor + duration + gap
 	return true
+end
+
+-- A zone with wisps (its twist): a trail of them along one way through the
+-- chunk just placed, a point each. The way is one the fairness check finds.
+-- For each row on it that asks something of you there's a wisp a moment
+-- before, in the lane to be in (unless something solid stands there), and one
+-- at the row itself: in the air over something to jump, on the ground under a
+-- bar or in a clear lane. `items` are the chunk's, from `start`.
+function World:SpawnWisps(items, start)
+	local wisps = self.tuning.wisps
+	local timed = {}
+	for index, item in ipairs(items) do
+		timed[index] = { t = start + item.t, lane = item.lane, code = item.code }
+	end
+	local ok, states = Patterns.Feasible(timed, self.tuning)
+	if not ok then
+		return
+	end
+	local state = states[self.rng:Int(1, #states)]
+	while state and state.parent do
+		local before = state.t - wisps.lead
+		local need, taken, crowded
+		for _, item in ipairs(timed) do
+			if item.lane == state.lane then
+				local asks = Patterns.REQUIREMENT[item.code]
+				if math.abs(item.t - state.t) < 1e-6 then
+					-- Something's there already: a hazard to jump or duck, or a
+					-- token (a low obstacle's air coin included).
+					need = asks or need
+					taken = taken or not asks or item.code == "A"
+				elseif asks and math.abs(item.t - before) < wisps.clear then
+					crowded = true
+				end
+			end
+		end
+		if not crowded then
+			self:AddEntity("wisp", state.lane, before, GROUND_TOKEN_Z)
+		end
+		if not taken then
+			self:AddEntity("wisp", state.lane, state.t, need == "jump" and AIR_TOKEN_Z or GROUND_TOKEN_Z)
+		end
+		state = state.parent
+	end
+end
+
+-- An escort's gift (its zone's twist): thrown back down the road to land in
+-- a lane at `at`. The zone's gifts take turns, starting again each zone. A
+-- gift of coins is a short line of them.
+function World:SpawnGift(twist, zone, at)
+	local tuning = self.tuning
+	local escort = tuning.escort
+	if self.giftZone ~= zone then
+		self.giftZone, self.giftCount = zone, 0
+	end
+	self.giftCount = self.giftCount + 1
+	self.giftNext = at + twist.giftEvery
+	local kind = twist.gifts[(self.giftCount - 1) % #twist.gifts + 1]
+	local lane = self.rng:Int(1, #tuning.lanes)
+	local count = kind == "coins" and escort.coins or 1
+	for index = 1, count do
+		local gift = self:AddEntity(kind == "coins" and "coin" or kind, lane, at + (index - 1) * escort.coinSpacing, GROUND_TOKEN_Z)
+		gift.thrown, gift.gift, gift.phase = true, true, "waiting"
+		gift.throwMax = escort.distance - 2
+	end
 end
 
 -- Places the next chunk. Returns false when nothing can be placed yet (the
@@ -570,9 +734,20 @@ function World:SpawnChunk()
 	end
 
 	local zone = Rules.ZoneIndex(tuning, self.cursor - self.paused)
-	local pattern, mirrored = Patterns.Pick(self.rng, zone, tuning.duckEnabled)
-	local tempo = Rules.Tempo(tuning, zone)
+	local twist = self:TwistFor(zone)
+	local pattern, mirrored = Patterns.Pick(self.rng, zone, tuning.duckEnabled, nil, twist)
+	local tempo, gap = self:Spacing(zone)
 	local duration = Patterns.Duration(pattern, tempo)
+	-- A pit lasts as long as its length takes to cover at the speed it's met
+	-- at, plus the moment past its far edge that a ramp sets you down.
+	local pitNear, pitLeave
+	if pattern.pit then
+		local pit = tuning.pit
+		local speedAt = Rules.Speed(tuning, math.max(0, self.cursor - self.paused))
+		pitNear = self.cursor + pit.lead / speedAt
+		pitLeave = pitNear + self.rng:Int(pattern.pit[1], pattern.pit[2]) * pit.tile / speedAt
+		duration = pitLeave - self.cursor + pit.landing
+	end
 
 	-- Keep zone changes clear, so the speed bump never lands mid-chunk.
 	local boundary = zone * tuning.zoneLength + self.paused
@@ -592,7 +767,8 @@ function World:SpawnChunk()
 		local arrive = self.cursor + item.t
 		local code = item.code
 		if code == "P" then
-			if arrive - self.lastPowerupTime >= tuning.powerupMinGap then
+			-- (Sooner after the last one where the zone's twist says so.)
+			if arrive - self.lastPowerupTime >= tuning.powerupMinGap * (twist and twist.powerupGap or 1) then
 				self.lastPowerupTime = arrive
 				-- No Wind Rider whose flight could still be on when a boss turns up.
 				local noFlight = bossStart and arrive + tuning.durations.windRider + 2 > bossStart
@@ -607,15 +783,55 @@ function World:SpawnChunk()
 		elseif code == "a" then
 			self:AddEntity("coin", item.lane, arrive, AIR_TOKEN_Z)
 		elseif code == "c" or code == "g" then
+			-- Where the zone's twist says so, a coin is sometimes a gem.
+			if code == "c" and twist and twist.gemChance and self.rng:Next() < twist.gemChance then
+				code = "g"
+			end
 			self:AddEntity(CODE_ROLE[code], item.lane, arrive, GROUND_TOKEN_Z)
+		elseif code == "R" then
+			-- A ramp knows where its pit ends, and has air coins along the flight.
+			local ramp = self:AddEntity("ramp", item.lane, arrive, 0)
+			ramp.leave = pitLeave
+			ramp.near = pitNear
+			local coins = math.floor((pitLeave - pitNear) * self.speed / tuning.pit.tile + 0.5) * tuning.pit.coins
+			for index = 1, coins do
+				self:AddEntity("coin", item.lane, pitNear + (pitLeave - pitNear) * (index - 0.5) / coins, AIR_TOKEN_Z)
+			end
 		else
 			self:AddEntity(CODE_ROLE[code], item.lane, arrive, 0)
 		end
 		self:Record(arrive, item.lane, code)
 	end
-	local gap = Rules.Gap(tuning, zone)
-	self:SpawnAlliance(items, self.cursor, self.cursor + duration + gap / 2, zone)
-	self.cursor = self.cursor + duration + gap
+	if pitNear then
+		-- The hole itself, for drawing: lane 2, as it's centred on the road.
+		local pit = self:AddEntity("pit", 2, pitNear, 0)
+		pit.leave = pitLeave
+	end
+	if twist and twist.wisps then
+		self:SpawnWisps(items, self.cursor)
+	end
+	local after = self.cursor + duration + gap / 2
+	-- A zone with vents (its twist) sometimes has one in the gap after a
+	-- chunk, in any lane, with ventExtra seconds of clear road after it: half
+	-- a gap before is time to step out of its lane, and what follows is time
+	-- to reach any lane of the next chunk. Never across a zone change or a
+	-- boss turning up. An escort's gift lands in the same spot, with clear
+	-- road after it so that taking it never costs you the next chunk.
+	local room = math.min(boundary, bossStart or math.huge) - tuning.zoneBreather - after
+	local extra = 0
+	if twist and twist.ventChance and twist.ventExtra < room and self.rng:Next() < twist.ventChance then
+		local lane = self.rng:Int(1, #tuning.lanes)
+		self:AddEntity("vent", lane, after, 0)
+		self:Record(after, lane, "B")
+		extra = twist.ventExtra
+	elseif twist and twist.gifts and twist.giftExtra < room and after >= (self.giftNext or 0) then
+		self:SpawnGift(twist, zone, after)
+		extra = twist.giftExtra
+	elseif not pitNear then
+		-- (No jogger after a pit: they'd have jogged across it.)
+		self:SpawnAlliance(items, self.cursor, after, zone, twist and twist.allianceChance)
+	end
+	self.cursor = self.cursor + duration + gap + extra
 	return true
 end
 
@@ -784,6 +1000,11 @@ function World:UpdateZone()
 		self.zoneKey = self:ZoneKey(index)
 		self.zoneStart = (index - 1) * tuning.zoneLength
 		self:Emit({ type = "zone", index = index, key = self.zoneKey, fromSpeed = fromSpeed })
+		-- A zone that blesses you (its twist) gives Thick Hide on the way in.
+		local twist = self:Twist()
+		if twist and twist.shield and not self.shield then
+			self:ApplyPowerup("shield")
+		end
 	end
 end
 
@@ -824,6 +1045,7 @@ function World:HitObstacle(entity)
 		self:Emit({ type = "smash", role = entity.role })
 	elseif self.shield then
 		self.shield = false
+		self:BreakCombo()
 		entity.smashed = true
 		self.safeLeft = tuning.hitSafeTime
 		self:Emit({ type = "shieldBreak", role = entity.role })
@@ -852,11 +1074,31 @@ end
 
 -- Running into an Alliance jogger knocks them flying, for points.
 function World:Knock(entity)
-	local points = self.tuning.points.knock or 0
+	local points = self:ComboPoints(self.tuning.points.knock or 0)
 	entity.knocked = true
 	self.knocks = self.knocks + 1
 	self.movePoints = self.movePoints + points
 	self:Emit({ type = "knock", points = points })
+end
+
+-- Touching a ramp throws you over its pit, to come down just past the far
+-- edge. It counts as a clean move, like a jump. A jump already under way
+-- becomes the throw, so the ramp can't be hopped over into the pit.
+function World:CheckRamp(entity, runner)
+	if entity.used or self.over or runner.flying or runner.launch then
+		return
+	end
+	local tuning = self.tuning
+	local shape = Rules.SHAPES.ramp
+	if math.abs(entity.y) < shape.halfDepth + tuning.runnerHalfDepth
+		and math.abs(entity.x - runner.x) < shape.halfWidth + tuning.runnerHalfWidth then
+		entity.used = true
+		runner:Launch(entity.leave - self.time + tuning.pit.landing, tuning.pit.height)
+		local points = self:ComboPoints(tuning.points.ramp or 0)
+		self.movePoints = self.movePoints + points
+		self.jumps = self.jumps + 1
+		self:Emit({ type = "cleared", role = "ramp", move = "jump", points = points })
+	end
 end
 
 -- Scores a jump or duck: while the obstacle passes through you, it must be in
@@ -886,6 +1128,7 @@ function World:CheckMove(entity, runner)
 	elseif entity.y <= -reach then
 		entity.moveScored = true
 		if entity.moveMade and not entity.moveMissed then
+			points = self:ComboPoints(points)
 			self.movePoints = self.movePoints + points
 			if move == "jump" then
 				self.jumps = self.jumps + 1
@@ -908,7 +1151,9 @@ function World:Tick(h)
 	end
 	self.course = self.time - self.paused
 	self:UpdateZone()
+	self:ApplyTwist()
 	self:UpdatePowerups(h)
+	self:UpdateCombo(h)
 	self:UpdateSpeed(h)
 	self.distance = self.distance + self.speed * h
 	self.timePoints = self.timePoints + Rules.TimeRate(tuning, self.zoneIndex) * h
@@ -942,23 +1187,35 @@ function World:Tick(h)
 	local entities = self.entities
 	local count = #entities
 	local kept = 0
+	local movesAhead = false
 	for index = 1, count do
 		local entity = entities[index]
 		entity.y = (entity.arrive - self.time) * self:Closing(entity.role)
+		if entity.y > 0 and MOVE_ROLE[entity.role] and not entity.smashed and not entity.knocked then
+			movesAhead = true
+		end
 		if entity.thrown and entity.phase ~= "landed" then
 			-- Once thrown it stays thrown, and once down it stays down, even if
 			-- the speed (and so where throws leave and land) changes.
-			local phase = Rules.ThrowPhase(tuning, entity.y, self.speed)
+			local phase = Rules.ThrowPhase(tuning, entity.y, self.speed, entity.throwMax)
 			if phase ~= "waiting" then
 				entity.phase = phase
 			end
 		end
 
 		local keep = true
-		if entity.y < behind or (orc and entity.role == "tauren" and entity.y > orc.despawnAhead) then
+		-- A pit and its ramps stay until the pit's far edge is behind you.
+		local back = entity.leave and (entity.leave - self.time) * self.speed or entity.y
+		if back < behind or (orc and entity.role == "tauren" and entity.y > orc.despawnAhead) then
 			keep = false
+		elseif entity.role == "ramp" then
+			self:CheckRamp(entity, runner)
+		elseif entity.role == "pit" then
+			-- Drawn only: its edges and ramps are what you meet.
 		elseif Rules.OBSTACLE[entity.role] then
-			if not self.over and Rules.HitsObstacle(tuning, entity.role, entity.x, entity.y, runner.x, runner.z, height) then
+			-- In the air off a ramp, the pit's edge in the next lane is below you.
+			if not self.over and not (runner.launch and entity.role == "pitedge")
+				and Rules.HitsObstacle(tuning, entity.role, entity.x, entity.y, runner.x, runner.z, height) then
 				self:HitObstacle(entity)
 			end
 			if entity.role == "tauren" then
@@ -970,6 +1227,8 @@ function World:Tick(h)
 			if not self.over and not entity.knocked and Rules.Touches(entity.x, entity.y, entity.z, runner.x, runner.z, height) then
 				self:Knock(entity)
 			end
+		elseif entity.thrown and entity.phase ~= "landed" then
+			-- An escort's gift still in the air: nothing to take yet.
 		elseif not self.over then
 			if magnet and Rules.TOKEN[entity.role] and entity.y > 0 and entity.y < tuning.magnetRange then
 				entity.magnet = true
@@ -991,6 +1250,7 @@ function World:Tick(h)
 	for index = kept + 1, count do
 		entities[index] = nil
 	end
+	self.movesAhead = movesAhead
 	-- A deciding spear counts even if something hit you in the same step.
 	if not self.over or self.bossBeaten then
 		self:UpdateBoss()

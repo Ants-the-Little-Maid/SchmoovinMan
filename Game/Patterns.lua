@@ -6,6 +6,11 @@ local _, ns = ...
 --   .  empty         c  coin            a  coin in the air      g  gem
 --   L  low (jump)    A  low + air coin  H  high bar (duck)      P  power-up
 --   B  block         W  wall piece      C  charging creature
+--   R  ramp over a pit   X  the pit's edge in a lane with no ramp
+-- A pattern with `pit = { fewest, most }` is a pit that many tiles long,
+-- right across the road, after its one row of ramps and edges.
+-- A pattern with `twist = "field"` is only used in a zone whose twist
+-- (Tuning.twists) has that field.
 local Patterns = {}
 ns.Patterns = Patterns
 
@@ -47,11 +52,21 @@ Patterns.LIST = {
 	{ name = "barricade", minZone = 4, weight = 2, rows = { { 0, "WW." }, { 1.0, "LLL" } } },
 	{ name = "underpass", minZone = 4, weight = 2, needsDuck = true, rows = { { 0, "HHB" }, { 1.0, "BHH" } } },
 	{ name = "hurdles", minZone = 5, weight = 1, needsDuck = true, rows = { { 0, "LLL" }, { 0.9, "HHH" }, { 1.8, "LLL" } } },
+
+	-- Stampede country (the Barrens' twist): two chargers abreast.
+	{ name = "chargerPair", minZone = 3, weight = 2, twist = "chargers", rows = { { 0, ".c." }, { 0.5, "C.C" }, { 0.8, ".c." } } },
+
+	-- Pits: get to a lane with a ramp, which throws you over. Two ramps are
+	-- easier to reach than one; mirroring puts a side ramp on either side.
+	{ name = "pitTwoRamps", minZone = 2, weight = 2, pit = { 2, 2 }, rows = { { 0, "RXR" } } },
+	{ name = "pitSideRamps", minZone = 2, weight = 2, pit = { 2, 3 }, rows = { { 0, "RRX" } } },
+	{ name = "pitMiddleRamp", minZone = 3, weight = 2, pit = { 2, 3 }, rows = { { 0, "XRX" } } },
+	{ name = "pitOneRamp", minZone = 4, weight = 2, pit = { 2, 3 }, rows = { { 0, "RXX" } } },
 }
 
 -- Requirement for each code; codes not listed ask nothing of the runner.
 -- T is a Tauren coming up from behind in an orc run (never in a pattern).
-Patterns.REQUIREMENT = { L = "jump", A = "jump", H = "duck", B = "avoid", W = "avoid", C = "avoid", T = "avoid" }
+Patterns.REQUIREMENT = { L = "jump", A = "jump", H = "duck", B = "avoid", W = "avoid", C = "avoid", X = "avoid", T = "avoid" }
 
 -- Fairness limits used by Feasible: seconds per lane moved, and the shortest
 -- time between two actions in a row.
@@ -92,8 +107,34 @@ function Patterns.Duration(pattern, tempo)
 	return last * tempo
 end
 
-local function Allowed(pattern, zone, duckEnabled)
-	return pattern.minZone <= zone and (duckEnabled ~= false or not pattern.needsDuck)
+-- True when a pattern has this code anywhere (remembered on the pattern).
+local function Has(pattern, code)
+	local has = pattern.has
+	if not has then
+		has = {}
+		pattern.has = has
+	end
+	if has[code] == nil then
+		has[code] = false
+		for _, row in ipairs(pattern.rows) do
+			if row[2]:find(code, 1, true) then
+				has[code] = true
+			end
+		end
+	end
+	return has[code]
+end
+
+-- twist: the zone's (Tuning.twists), if it has one.
+local function Allowed(pattern, zone, duckEnabled, twist)
+	if pattern.twist and not (twist and twist[pattern.twist]) then
+		return false
+	end
+	local minZone = pattern.minZone
+	if twist and twist.chargerEarly and Has(pattern, "C") then
+		minZone = minZone - twist.chargerEarly
+	end
+	return minZone <= zone and (duckEnabled ~= false or not pattern.needsDuck)
 end
 
 -- True when a pattern asks something of the runner (not just tokens).
@@ -113,13 +154,31 @@ end
 
 Patterns.HasHazard = HasHazard
 
+-- A pattern's weight in a zone with this twist: more chargers, power-ups or
+-- token-only patterns where the twist says so.
+local function Weight(pattern, twist)
+	local weight = pattern.weight
+	if twist then
+		if twist.chargers and Has(pattern, "C") then
+			weight = weight * twist.chargers
+		end
+		if twist.powerups and Has(pattern, "P") then
+			weight = weight * twist.powerups
+		end
+		if twist.loot and not HasHazard(pattern) and not Has(pattern, "P") then
+			weight = weight * twist.loot
+		end
+	end
+	return weight
+end
+
 -- Weighted pick among patterns unlocked by this zone. With ducking off,
 -- patterns that need it are left out. `accept`, if given, must also pass
 -- (a boss uses it for hazards that fit before it gives up); with it, nil
--- comes back when nothing does.
-function Patterns.Pick(rng, zone, duckEnabled, accept)
+-- comes back when nothing does. `twist`: the zone's, if it has one.
+function Patterns.Pick(rng, zone, duckEnabled, accept, twist)
 	local pattern = ns.Random.Weighted(Patterns.LIST, function(item)
-		return Allowed(item, zone, duckEnabled) and (not accept or accept(item)) and item.weight or 0
+		return Allowed(item, zone, duckEnabled, twist) and (not accept or accept(item)) and Weight(item, twist) or 0
 	end, rng:Next())
 	if pattern then
 		return pattern, rng:Next() < 0.5
@@ -152,9 +211,11 @@ end
 -- Checks a timeline of { t, lane, code } (absolute times) can be survived by a
 -- player obeying LIMITS. Returns true and the end states, or false and the time
 -- of the first impossible row. States carry over between calls.
-function Patterns.Feasible(items, tuning, states)
+-- laneChangeTime: seconds a lane change takes, where it isn't the usual
+-- (on ice, for placing something between rows whose spacing allows for it).
+function Patterns.Feasible(items, tuning, states, laneChangeTime)
 	local limits = Patterns.LIMITS
-	local moveCost = tuning.laneChangeTime + limits.reaction
+	local moveCost = (laneChangeTime or tuning.laneChangeTime) + limits.reaction
 	states = states or Patterns.StartStates()
 
 	local index = 1
