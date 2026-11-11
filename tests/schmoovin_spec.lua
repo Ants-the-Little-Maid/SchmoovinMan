@@ -1047,6 +1047,39 @@ do
 	check("message fits 255 chars", #Codec.EncodeBest({ score = 100000000, tenths = 3600000, tokens = 1000000, zones = 100000, when = 9999999999 }) <= 255)
 end
 
+-- Zone models, event lists and Alliance joggers' lanes -------------------------------
+
+do
+	local world = World.New(7, copy(Tuning), { bosses = false })
+	local later = world:AddEntity("low", 2, Tuning.zoneLength + 2, 0)
+	local sooner = world:AddEntity("low", 2, 1, 0)
+	check("an entity keeps the zone it arrives in", later.zoneKey == world:ZoneKey(2) and sooner.zoneKey == world:ZoneKey(1))
+	world:DrainEvents()
+	world:Emit({ type = "test" })
+	local first = world:DrainEvents()
+	check("drained events come back once", #first == 1 and first[1].type == "test" and #world:DrainEvents() == 0)
+
+	-- A charger starts further off than the road's hazards, so its lane is
+	-- never offered to an Alliance jogger, however soon it's due.
+	local tuning = copy(Tuning)
+	tuning.alliance = { chance = 1, minZone = 1, speedShare = 0.45 }
+	local busy = World.New(3, tuning, { bosses = false })
+	busy.speed = 20
+	busy:AddEntity("charger", 1, 2.7, 0)
+	busy:AddEntity("charger", 2, 2.7, 0)
+	for _ = 1, 20 do
+		busy:SpawnAlliance({}, 0, 6, 1)
+	end
+	local joggers, clear = 0, true
+	for _, entity in ipairs(busy.entities) do
+		if entity.role == "alliance" then
+			joggers = joggers + 1
+			clear = clear and entity.lane == 3
+		end
+	end
+	check("Alliance joggers keep out of a charger's lane", joggers == 20 and clear, joggers)
+end
+
 print(("%d of %d checks passed (%d seeds, %d minutes each, bot time %.1fs)"):format(total - failures, total, seedCount, minutes, os.clock() - clock))
 if failures > 0 then
 	os.exit(1)

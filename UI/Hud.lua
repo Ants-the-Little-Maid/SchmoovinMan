@@ -28,6 +28,8 @@ local PIP_OFF = "3a1410"
 function Hud.Create(layer)
 	local self = setmetatable({}, Hud)
 	self.layer = layer
+	-- What each text last showed (see Hud:Changed).
+	self.drawn = {}
 	local C = UI.COLORS
 
 	-- Left panel: score and best, the run time beside the label, then the
@@ -280,59 +282,106 @@ end
 
 function Hud:SetShown(shown)
 	self.layer:SetShown(shown)
+	-- Everything is written again the next time it's drawn.
+	wipe(self.drawn)
+end
+
+-- Update runs every frame, but most of what it shows changes a few times a
+-- second at most. Each text is written only when the number behind it
+-- changes (self.drawn remembers the last), so a frame with nothing new
+-- builds no strings.
+function Hud:Changed(key, value)
+	if self.drawn[key] == value then
+		return false
+	end
+	self.drawn[key] = value
+	return true
 end
 
 function Hud:Update(world, best, zoneName, now)
 	local tuning = world.tuning
-	self.score:SetText(UI.FormatNumber(world.score))
-	if best and world.score > best then
-		self.best:SetText("New best!")
-		self.best:SetTextColor(UI.Hex(UI.COLORS.green))
-	else
-		self.best:SetText("Best " .. UI.FormatNumber(best or 0))
-		self.best:SetTextColor(UI.Hex(UI.COLORS.subText))
+	local score = world.score
+	if self:Changed("score", score) then
+		self.score:SetText(UI.FormatNumber(score))
 	end
-	self.time:SetText(UI.FormatTime(world.time))
+	local beaten = best ~= nil and score > best
+	if self:Changed("best", beaten and -1 or (best or 0)) then
+		if beaten then
+			self.best:SetText("New best!")
+			self.best:SetTextColor(UI.Hex(UI.COLORS.green))
+		else
+			self.best:SetText("Best " .. UI.FormatNumber(best or 0))
+			self.best:SetTextColor(UI.Hex(UI.COLORS.subText))
+		end
+	end
+	if self:Changed("time", math.floor(world.time * 10 + 0.5)) then
+		self.time:SetText(UI.FormatTime(world.time))
+	end
 	-- Zones follow the zone clock, which stops while a boss is out.
 	local intoZone = world.course - world.zoneStart
 	self.zoneBar:SetValue(intoZone / tuning.zoneLength)
-	self.zone:SetText(zoneName)
-	-- In an orc run, the Tauren's speed: yours stays put.
-	self.speed:SetText(string.format("%.1f yd/s", world.taurenSpeed or world.speed))
-	if world:InFight() then
-		self.zoneNext:SetText(string.format("Zone %d - paused", world.zoneIndex))
-	else
-		self.zoneNext:SetText(string.format("Zone %d - next in %s", world.zoneIndex, Clock(math.max(0, tuning.zoneLength - intoZone))))
+	if self:Changed("zone", zoneName) then
+		self.zone:SetText(zoneName)
 	end
-	self.tokens:SetText(UI.FormatNumber(world.tokens))
+	-- In an orc run, the Tauren's speed: yours stays put.
+	local speed = world.taurenSpeed or world.speed
+	if self:Changed("speed", math.floor(speed * 10 + 0.5)) then
+		self.speed:SetText(string.format("%.1f yd/s", speed))
+	end
+	local left = math.max(0, tuning.zoneLength - intoZone)
+	local fighting = world:InFight()
+	if self:Changed("zoneNext", world.zoneIndex * 100000 + (fighting and 99999 or math.ceil(left))) then
+		if fighting then
+			self.zoneNext:SetText(string.format("Zone %d - paused", world.zoneIndex))
+		else
+			self.zoneNext:SetText(string.format("Zone %d - next in %s", world.zoneIndex, Clock(left)))
+		end
+	end
+	if self:Changed("tokens", world.tokens) then
+		self.tokens:SetText(UI.FormatNumber(world.tokens))
+	end
 
-	-- Power-up bars, top to bottom in a fixed order.
+	-- Power-up bars, top to bottom in a fixed order. They're laid out again
+	-- only when the set of them showing changes.
+	local showing = world.shield and 1 or 0
+	for index, role in ipairs(POWERUP_ORDER) do
+		if world.powerups[role] then
+			showing = showing + 2 ^ index
+		end
+	end
+	local layout = self:Changed("powerups", showing)
 	local anchor
 	for _, role in ipairs(POWERUP_ORDER) do
 		local item = self.powerups[role]
 		local remaining = world.powerups[role]
 		if remaining then
-			item.panel:ClearAllPoints()
-			if anchor then
-				item.panel:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -8)
-			else
-				item.panel:SetPoint("TOPLEFT", self.layer, "TOPLEFT", 14, POWERUPS_TOP)
+			if layout then
+				item.panel:ClearAllPoints()
+				if anchor then
+					item.panel:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -8)
+				else
+					item.panel:SetPoint("TOPLEFT", self.layer, "TOPLEFT", 14, POWERUPS_TOP)
+				end
+				item.panel:Show()
 			end
-			item.panel:Show()
-			item.left:SetText(string.format("%.1fs", remaining))
+			if self:Changed(role, math.floor(remaining * 10 + 0.5)) then
+				item.left:SetText(string.format("%.1fs", remaining))
+			end
 			item.bar:SetValue(remaining / tuning.durations[role])
 			anchor = item.panel
-		else
+		elseif layout then
 			item.panel:Hide()
 		end
 	end
-	self.shield:ClearAllPoints()
-	if anchor then
-		self.shield:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -8)
-	else
-		self.shield:SetPoint("TOPLEFT", self.layer, "TOPLEFT", 14, POWERUPS_TOP)
+	if layout then
+		self.shield:ClearAllPoints()
+		if anchor then
+			self.shield:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -8)
+		else
+			self.shield:SetPoint("TOPLEFT", self.layer, "TOPLEFT", 14, POWERUPS_TOP)
+		end
+		self.shield:SetShown(world.shield)
 	end
-	self.shield:SetShown(world.shield)
 
 	-- Banner fades in and out; the boss bar shares its slot, so it shows as
 	-- the banner goes.

@@ -52,15 +52,21 @@ end
 
 -- This character's own best. The personal top 10 is shared across the
 -- account, so its first entry may belong to another character; only runs
--- made by the one logged in are shared under its name.
+-- made by the one logged in are shared under its name. Its best is also kept
+-- by name (ns.db.bests), as other characters' runs can push it out of the
+-- top 10; runs from before that was kept are found in the top 10.
 function GuildBoard.MyBest()
 	local name = GuildBoard.PlayerName()
+	local best = name and ns.db.bests[name]
 	for _, entry in ipairs(ns.Scores.List()) do
 		if entry.character == name then
-			return entry
+			if not best or entry.score > best.score then
+				best = entry
+			end
+			break
 		end
 	end
-	return nil
+	return best
 end
 
 local function GuildKey()
@@ -199,6 +205,12 @@ local function TrySend(message)
 end
 
 Flush = function()
+	-- Out of a guild there's nobody to send to, and nothing to wait for: a
+	-- queued best mustn't go to whichever guild is joined next.
+	if not IsInGuild() then
+		wipe(pending)
+		return
+	end
 	while pending[1] do
 		if not TrySend(pending[1]) then
 			ScheduleRetry()

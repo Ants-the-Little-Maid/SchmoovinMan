@@ -354,7 +354,8 @@ function Ground:DrawMarkings(distance)
 end
 
 -- Red marks where a boss's throws will land: markers = { count, [i] = { x, y,
--- halfWidth, halfDepth, alpha } }. Drawn over the road, under the models.
+-- halfWidth, halfDepth, alpha [, r, g, b] } }, and the optional hazard markers
+-- in their own colours. Drawn over the road, under the models.
 function Ground:DrawMarkers(markers)
 	self.markers = self.markers or {}
 	local textures = self.markers
@@ -371,7 +372,7 @@ function Ground:DrawMarkers(markers)
 		if not drawable then
 			texture:Hide()
 		elseif self:Strip(texture, marker.x - marker.halfWidth, marker.x + marker.halfWidth, marker.y - marker.halfDepth, marker.y + marker.halfDepth) then
-			texture:SetVertexColor(0.88, 0.21, 0.16, marker.alpha)
+			texture:SetVertexColor(marker.r or 0.88, marker.g or 0.21, marker.b or 0.16, marker.alpha)
 		end
 	end
 	for index = markers.count + 1, #textures do

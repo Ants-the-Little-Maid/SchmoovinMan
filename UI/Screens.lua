@@ -8,16 +8,21 @@ ns.Screens = Screens
 local UI = ns.UI
 local BUTTON_FONT = "Fonts\\FRIZQT__.TTF"
 
-local CHARGER_NAMES = {
-	mulgore = "a kodo",
-	barrens = "a thunder lizard",
-	thousandneedles = "a kodo",
-	ashenvale = "a stag",
-	burningsteppes = "a fire elemental",
-	silithus = "a silithid",
-	ungoro = "a devilsaur",
-	winterspring = "a yeti",
-}
+-- "a Kodo", "an Ironforge guard": a model's name with its article.
+local function WithArticle(name)
+	return (name:find("^[AEIOUaeiou]") and "an " or "a ") .. name
+end
+
+-- What charged you: the model that was drawn (which may be a backup or an
+-- Options pick), else the first in that zone's chain, else "a beast".
+local function ChargerName(zone, drawnName)
+	local name = drawnName
+	if not name and zone then
+		local first = ns.Models.List(zone, "charger")[1]
+		name = first and first.name
+	end
+	return name and WithArticle(name) or "a beast"
+end
 
 local CRASH_TEXT = {
 	low = "Tripped over an obstacle",
@@ -477,13 +482,14 @@ function Screens:ShowBoard(tab)
 	self.boardFooter:SetText(footer or "")
 end
 
-function Screens:ShowGameOver(world, entry, personalRank, guildRank, isBest)
+-- crashName: the name of the model you ran into, if it was drawn.
+function Screens:ShowGameOver(world, entry, personalRank, guildRank, isBest, crashName)
 	self.lastEntry = entry
 	local zone = ns.ZonesByKey[world.crashZoneKey or world.zoneKey]
 	local zoneName = zone and zone.name or "?"
 	local cause
 	if world.crashRole == "charger" then
-		cause = "Charged by " .. (CHARGER_NAMES[world.crashZoneKey] or "a beast")
+		cause = "Charged by " .. ChargerName(zone, crashName)
 	else
 		cause = CRASH_TEXT[world.crashRole] or "Run ended"
 	end

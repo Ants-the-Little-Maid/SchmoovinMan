@@ -242,6 +242,7 @@ function Controller:StartRun()
 		self.hud:ShowBanner(ns.ZonesByKey[self.world.zoneKey].name, nil, nil, GetTime())
 	end
 	self.overAt = nil
+	self.crashName = nil
 	self:StopCountdown()
 	self.nextQuip = 0
 	self.nextComplaint = 0
@@ -254,6 +255,13 @@ end
 
 function Controller:Pause(reason)
 	if self.state ~= "running" then
+		return
+	end
+	-- A run that has crashed is over, though it stays on screen for a moment:
+	-- it ends now (and is saved) rather than pausing, where Restart or Quit
+	-- would have dropped it.
+	if self.overAt then
+		self:EndRun()
 		return
 	end
 	self:StopCountdown()
@@ -343,7 +351,7 @@ function Controller:EndRun()
 		ns.PlaySound("newBest")
 	end
 	self.hud:SetShown(false)
-	self.screens:ShowGameOver(world, entry, rank, guildRank, isBest)
+	self.screens:ShowGameOver(world, entry, rank, guildRank, isBest, self.crashName)
 	self.state = "over"
 
 	local failures = self.renderer:TakeFailures()
@@ -387,6 +395,8 @@ function Controller:HandleEvents(now)
 			ns.PlaySound("crash")
 			self:HideBubbles()
 			self.overAt = now
+			-- What you ran into, as it was drawn (asked now, while it's on screen).
+			self.crashName = self.renderer:EntityModelName(world.crashId)
 		elseif kind == "zone" then
 			local zone = ns.ZonesByKey[event.key]
 			self.zoneKey = event.key
@@ -540,8 +550,13 @@ function Controller:UpdateQuips()
 	end
 	local quips = ns.Assets.quips
 	local renderer = self.renderer
-	local runnerHead = function()
-		return renderer:RunnerHeadPoint(self.world)
+	-- Made once, not every frame.
+	local runnerHead = self.runnerHead
+	if not runnerHead then
+		runnerHead = function()
+			return renderer:RunnerHeadPoint(self.world)
+		end
+		self.runnerHead = runnerHead
 	end
 	local jogger = passes[1]
 	local quiet = not self.bubble:IsShown() and not self.replyBubble:IsShown() and not self.pendingReply

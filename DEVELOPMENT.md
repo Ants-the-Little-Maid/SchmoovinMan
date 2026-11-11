@@ -2,7 +2,11 @@
 
 How the addon is built, what was checked, and why things are the way they are. The player-facing overview is [README.md](README.md); version history is [CHANGELOG.md](CHANGELOG.md).
 
-**Status:** version 0.8.0 (2026-11-06): jump (+2) and duck (+3) points, scored in `World:CheckMove` only when the obstacle is in your path and you make its move; a minimap right-click menu built with `MenuUtil.CreateContextMenu`. From 0.7.2: `IsGeoReady` is only waited on for 1 second when it explicitly returns false: in Forever it never turns true for props loaded by file ID, and waiting on it in 0.7.1 hid them. Characters are measured by their active box with scale kept between 0.5 and 2.0, after a tester saw a tiny runner. Playtests have covered up to 0.5.0, plus reports on 0.7.0 and 0.7.1; 0.7.2 hasn't been seen in game yet.
+**Status:** version 0.11.1 (2026-11-11): hazard markers, chargers and bosses centred on their lane, and nine fixes from a review of the whole addon (see [CHANGELOG.md](CHANGELOG.md)). 0.11.0 (2026-11-09) added the Options screen, starting speeds with a score multiplier, per-zone model picks and the resume countdown. 0.10.0 (2026-11-08) added bosses, the fight camera and the HUD layout that keeps the road clear.
+
+- **Tests:** all pass on 0.11.1 locally; 0.11.0 passed in GitHub Actions. See [Test results](#test-results).
+- **In game:** 0.11.1 has been played by the author, with the hazard markers and the charger centring checked (confirmed 2026-11-11). The released 0.11.0 was played and checked before it (confirmed 2026-11-10), including the Options screen, model picks, resume countdown, starting speeds, the ducking pose, hazard sizes, saved scores and the guild board.
+- **Still true from earlier versions:** `IsGeoReady` is only waited on for 1 second when it explicitly returns false. In Forever it never turns true for props loaded by file ID, and waiting on it in 0.7.1 hid them. Characters are measured by their active box with scale kept between 0.5 and 2.0, after a tester saw a tiny runner.
 
 ## Running the tests
 
@@ -50,7 +54,7 @@ Sizes for a single-lane hazard:
 | Wall | 2.2 | 1.8 | 1.6 |
 | Charger | 2.3 | at most 2.0 | |
 
-All sizes are in yards; a lane is 2.6 wide. Hit boxes are unchanged. Sizes are the `TARGET` table at the top of `Render/Renderer.lua`. 0.6.x hasn't been checked in game.
+All sizes are in yards; a lane is 2.6 wide. Hit boxes are unchanged. Sizes are the `TARGET` table at the top of `Render/Renderer.lua`. Checked in game on 0.11.0 (confirmed 2026-11-10).
 
 ## Target
 
@@ -68,7 +72,9 @@ Every WoW method the addon calls was checked against the generated API docs at t
 | Command | What it does |
 |---|---|
 | `/schmoove` or `/schmoovin` | Opens or closes the game |
+| `/schmoove start` | Opens the game straight into a run, or brings back a paused one |
 | `/schmoove sound` | Turns sound on or off |
+| `/schmoove markers` | Turns hazard markers on or off (also in Options). Off by default |
 | `/schmoove duck` | Turns ducking on or off. Off swaps every high bar for a block, so runs stay fair |
 | `/schmoove zones 15`, `25`, `35` or `45` | Seconds per zone; the start screen's Zones button cycles the same choices |
 | `/schmoove speed 8`, `11` or `14` | Starting speed (Slow, Normal, Fast); the start screen's Start button cycles the same choices |
@@ -116,6 +122,7 @@ Options opens over the start or pause screen (opening it mid-run pauses the run)
 | | |
 |---|---|
 | Game | Sound, Ducking, Resume countdown, Zone length, Starting speed and Window size. Ducking, zone length and starting speed apply from the next run, as with the commands |
+| Hazard markers | Off by default. On, each hazard on the road has a mark under it, drawn like a boss throw's landing mark (`Renderer:AddHazardMarker`): amber for jump, blue for duck, red for keep clear, nearly the width of its lane and 0.6 yards longer than the hazard front and back. Side-by-side pieces of one barrier get marks that meet |
 | Resume countdown | On by default: after Resume, a big 3, 2, 1 in the middle of the view and nothing moves (keys wait) until it ends. Pausing during it stops it |
 | Models | For each zone, the model each hazard (low, high bar, block, wall), charger, coin and gem uses, with a turning preview. The choices are the zone's own models, the shared fallbacks and brighter extras (`ns.ExtraModels` in `Data/Zones.lua`: a fused powder keg, the Tirisfal barricade, a powder keg and a beer keg, a large gold pile, red and blue jewels and the Blackrock museum gem). A pick is saved per zone (`SchmoovinManDB.models`), goes first in that role's chain from then on, and falls back to the usual model if it isn't in the client; the preview says "Not in this client" for those. Every model has a `name` for this list. `Render/Models.lua` builds the chains |
 
@@ -178,19 +185,25 @@ A design mock-up was approved on 2026-11-06. It shows the live run, a zone chang
 
 | Check | Result |
 |---|---|
-| Lua syntax | All 25 Lua files parse as Lua 5.1 (luaparse 0.3.1) |
-| Logic tests (`tests/schmoovin_spec.lua`, fengari) | On 0.7.0, with the multi-lane patterns: 396 of 396 passed with 25 s zones (20 seeds x 10 minutes); 356 of 356 with 15 s zones (10 seeds x 10 minutes); ducking on and off in both. The duck-only patterns are confirmed impossible without ducking and never picked with it off |
-| 0.11.0 (2026-11-09, fengari) | Logic tests: 447 of 447 with 15 s zones (4 seeds x 5 minutes, as CI runs them) and 440 of 440 with 25 s zones (3 seeds x 3 minutes). New checks cover slow and fast starts: their speed, the score multiplier, fair spawns and the bot surviving them. The smoke test passed, now also covering `/schmoove speed`, the resume countdown, every Options row, model picks, their preview and that every zone and role offers named choices, and that resuming or starting a run closes Options |
-| Smoke test (`tests/schmoovin_smoke.lua`) | Passed on 0.7.0, plus grouped high bars showing only outer posts, including every window size, the Zones button, `/schmoove zones`, joggers and speech bubbles, the Tauren exchange (your compliment, then their reply) and that orcs never get Tauren lines, posts under high bars, and the backdrop, panel button and close button templates. |
+| Lua syntax | 0.11.0: all 27 Lua files (25 addon, 2 test) parse as Lua 5.1 (luaparse 0.3.1), rechecked 2026-11-10 |
+| 0.11.1 (2026-11-11, fengari) | All 27 Lua files parse as Lua 5.1. Logic tests, with CI's settings: 461 of 461 with 25 s zones and 449 of 449 with 15 s zones, with new checks that an entity keeps the zone it arrives in, that drained events come back once and that Alliance joggers keep out of a charger's lane. The smoke test passed, now also covering hazard markers and that a wrong `/schmoove zones` or `/schmoove speed` value leaves the setting alone. A run that crashes and is then closed, the crash text and each character's own best have no test of their own |
+| GitHub Actions (Lua 5.1.5) | 0.11.0: logic tests and smoke test passed on `main` and on tag `v0.11.0` (2026-11-09) |
+| 0.11.0 logic tests (`tests/schmoovin_spec.lua`, fengari, 2026-11-10) | With CI's settings: 458 of 458 with 25 s zones (6 seeds x 5 minutes) and 446 of 446 with 15 s zones (4 seeds x 5 minutes). Checks added in 0.11.0 cover slow and fast starts: their speed, the score multiplier, fair spawns and the bot surviving them |
+| 0.11.0 smoke test (`tests/schmoovin_smoke.lua`, fengari, 2026-11-10) | Passed. Added in 0.11.0: `/schmoove speed`, the resume countdown, every Options row, model picks, their preview, that every zone and role offers named choices, and that resuming or starting a run closes Options |
+| History: 0.7.0 logic tests | With the multi-lane patterns: 396 of 396 passed with 25 s zones (20 seeds x 10 minutes); 356 of 356 with 15 s zones (10 seeds x 10 minutes); ducking on and off in both. The duck-only patterns are confirmed impossible without ducking and never picked with it off |
+| History: 0.7.0 smoke test | Passed, plus grouped high bars showing only outer posts, including every window size, the Zones button, `/schmoove zones`, joggers and speech bubbles, the Tauren exchange (your compliment, then their reply) and that orcs never get Tauren lines, posts under high bars, and the backdrop, panel button and close button templates. |
 | API names | Every widget and ModelScene method called is declared in Forever's generated docs at the pinned commit |
-| Asset IDs | Every file ID and display ID exists in the listfile and wago.tools tables. Whether Forever ships each file is untested |
+| Asset IDs | Every file ID and display ID exists in the listfile and wago.tools tables. Forever doesn't ship all of them: the ones found missing in play were replaced (0.8.1, 0.9.0, 0.9.1), and each role keeps backups for any others |
 | UIForever simulator | Not run |
-| Load in the Forever client | 0.1.0 loaded and played (playtest, 2026-11-06). 0.2.0 not run |
-| Tauren model, animations, ducking pose | Not run |
-| Model sizes, ground textures, fog | 0.1.0: coin piles too big, camera too close, lanes unclear, moving diagonal lines (playtest). Fixed in 0.2.0, not rechecked |
-| Wind rider mounting | Not run. Falls back to sitting the Tauren on top if attaching fails |
-| Guild board with another player | Not run |
-| Scores after `/reload` and restart | Not run |
+| Load in the Forever client | Loaded and played from 0.1.0 (2026-11-06) to the released 0.11.0 (confirmed 2026-11-10) |
+| Tauren model, animations, ducking pose | The runner has been seen in game: the tiny runner (fixed in 0.7.1) and the missing later-expansion looks (fixed in 0.9.1) came from playtests. The ducking pose is checked (confirmed 2026-11-10) |
+| Model sizes, ground textures, fog | 0.1.0: coin piles too big, camera too close, lanes unclear, moving diagonal lines (playtest). Reworked in 0.2.0 and 0.3.0 after further looks. Models missing from Forever were reported and replaced in 0.8.1 and 0.9.0. Hazard sizes are checked (confirmed 2026-11-10) |
+| Wind rider mounting | Flights have been seen in game: a playtest found the runner staying giant after one, fixed in 0.9.1. Flights have looked fine since (confirmed 2026-11-10). Falls back to sitting the Tauren on top if attaching fails |
+| Hazard markers, charger and boss centring | Checked in game on 0.11.1 (confirmed 2026-11-11). `/schmoove measure` (not in the help) lists the chargers and boss on screen with their box measurements, for any that still sit off their lane |
+| Boss fights | The fight camera was checked in game on 0.10.0 (2026-11-08) |
+| Options, model picks, resume countdown, starting speeds | Checked in game on 0.11.0 (confirmed 2026-11-10) |
+| Guild board with another player | Works with other players (confirmed 2026-11-10) |
+| Scores after `/reload` and restart | Checked in game (confirmed 2026-11-10) |
 | Screenshot comparison with the mock-up | Not run |
 
 The logic tests cover scoring, the speed curve (ramp, zone bumps, cap), zone order, runner jump and duck sizes, power-ups, shield and crash rules, guild message parsing, and fairness:
@@ -201,7 +214,6 @@ The logic tests cover scoring, the speed curve (ramp, zone bumps, cap), zone ord
 ## Known limits
 
 - Skyborne joggers were asked for, but Skyborne isn't in the game data: only unreleased file names exist, with no NPC appearances. Female Tauren stand in for now.
-
 - The ground is a grid of small cells fixed to the world. Each shows part of one texture tile, so nothing relies on texture wrapping, and cells near the camera are 1 yard deep so their perspective bend doesn't show.
 - The ground is drawn behind the models, so a model below ground level still shows in front of it.
 - Scenery is flat-placed beside the track; it doesn't follow hills. Once a piece's size is known it moves out until its whole box, as turned, is at least 1.5 yards clear of the road edge.

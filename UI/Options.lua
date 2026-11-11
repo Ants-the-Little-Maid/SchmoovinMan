@@ -111,6 +111,11 @@ function Options:BuildGame(box)
 			click = function() ns.SetCountdown(settings().countdown == false) end,
 		},
 		{
+			label = "Hazard markers",
+			text = function() return OnOff(settings().markers == true) end,
+			click = function() ns.SetMarkers(settings().markers ~= true) end,
+		},
+		{
 			label = "Zone length",
 			text = function()
 				for _, choice in ipairs(ns.Tuning.zoneLengths) do
@@ -169,7 +174,7 @@ function Options:BuildGame(box)
 	note:SetPoint("TOPLEFT", 24, -92 - #rows * 34 - 6)
 	note:SetWidth(360)
 	note:SetJustifyH("LEFT")
-	note:SetText("Ducking, zone length and starting speed apply from your next run. Slow starts score x0.75 and fast starts x1.25. The countdown gives you 3 seconds before a paused run goes on.")
+	note:SetText("Ducking, zone length and starting speed apply from your next run. Slow starts score x0.75 and fast starts x1.25. The countdown gives you 3 seconds before a paused run goes on. Hazard markers put a mark on the road under each hazard: amber to jump, blue to duck, red to keep clear.")
 
 	local line = box:CreateTexture(nil, "ARTWORK")
 	line:SetColorTexture(UI.Hex(C.divider))

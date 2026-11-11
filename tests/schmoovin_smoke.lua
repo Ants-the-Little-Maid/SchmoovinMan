@@ -449,7 +449,7 @@ C.frame:Hide()
 assert(C.state == "paused", "closing didn't pause")
 C.frame:Show()
 for _, key in ipairs({ "small", "large", "huge", "medium", "bogus" }) do C:SetWindowSize(key); Frames(0.2) end
-C:ShowStart(); C.screens.zoneButton.scripts.OnClick(C.screens.zoneButton); assert(ns.Tuning.zoneLength == 35, "zone button did not cycle"); SlashCmdList.SCHMOOVINMAN("zones 15"); assert(ns.Tuning.zoneLength == 15 and ns.db.settings.zoneLength == 15); SlashCmdList.SCHMOOVINMAN("zones 99"); assert(ns.Tuning.zoneLength == 25)
+C:ShowStart(); C.screens.zoneButton.scripts.OnClick(C.screens.zoneButton); assert(ns.Tuning.zoneLength == 35, "zone button did not cycle"); SlashCmdList.SCHMOOVINMAN("zones 15"); assert(ns.Tuning.zoneLength == 15 and ns.db.settings.zoneLength == 15); SlashCmdList.SCHMOOVINMAN("zones 99"); SlashCmdList.SCHMOOVINMAN("zones"); assert(ns.Tuning.zoneLength == 15, "a wrong or missing zone length changed the setting"); SlashCmdList.SCHMOOVINMAN("speed 14"); SlashCmdList.SCHMOOVINMAN("speed 10"); assert(ns.Tuning.baseSpeed == 14, "a wrong starting speed changed the setting"); SlashCmdList.SCHMOOVINMAN("speed 11"); SlashCmdList.SCHMOOVINMAN("zones 25"); assert(ns.Tuning.zoneLength == 25 and ns.Tuning.baseSpeed == 11)
 SlashCmdList.SCHMOOVINMAN("sound")
 SlashCmdList.SCHMOOVINMAN("duck")
 SlashCmdList.SCHMOOVINMAN("nonsense")
@@ -966,6 +966,25 @@ do
 	assert(math.abs(scene.pitch - chase.pitch) < 1e-9 and math.abs(scene.fov - chase.fov) < 1e-9, "camera stayed pulled back after an orc run")
 	assert(R.ground.near == -6, "road still drawn far back after an orc run")
 	rawset(C.screens.crashText, "SetText", nil)
+end
+-- Hazard markers: off by default, a mark per hazard when on.
+do
+	local C = ns.Controller
+	local world = C.world
+	assert(ns.db.settings.markers == false, "hazard markers on by default")
+	world.entities = {}
+	world:AddEntity("block", 1, world.time + 2, 0)
+	world:AddEntity("low", 3, world.time + 2, 0)
+	Frames(0.05)
+	assert(C.renderer.markers.count == 0, "hazard marks drawn with the setting off")
+	SlashCmdList.SCHMOOVINMAN("markers")
+	Frames(0.05)
+	local markers = C.renderer.markers
+	assert(ns.db.settings.markers == true and markers.count == 2, "no mark per hazard: " .. tostring(markers.count))
+	assert(markers[1].r ~= markers[2].r, "jump and avoid marks share a colour")
+	SlashCmdList.SCHMOOVINMAN("markers")
+	Frames(0.05)
+	assert(C.renderer.markers.count == 0, "hazard marks still drawn after turning them off")
 end
 print("templates used: " .. table.concat((function() local t = {} for k in pairs(templatesUsed) do t[#t + 1] = k end table.sort(t) return t end)(), ", "))
 print(("smoke ok: %d scores, guild board %d, %d messages sent, best %s"):format(#ns.db.scores, #ns.GuildBoard.List(), #sent, tostring(ns.db.scores[1].score)))

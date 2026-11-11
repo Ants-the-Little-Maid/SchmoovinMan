@@ -150,9 +150,16 @@ function World:Emit(event)
 	self.events[#self.events + 1] = event
 end
 
+-- The returned list is only good until the next call: two lists take turns,
+-- so draining every frame makes no new tables.
 function World:DrainEvents()
 	local events = self.events
-	self.events = {}
+	local spare = self.spareEvents or {}
+	for index = #spare, 1, -1 do
+		spare[index] = nil
+	end
+	self.events = spare
+	self.spareEvents = events
 	return events
 end
 
@@ -354,12 +361,26 @@ end
 
 -- Spawning ------------------------------------------------------------------
 
+-- The zone an entity arriving at run time `arrive` will be met in: the boss's
+-- zone for a fight (the zone clock stands still through it), otherwise by the
+-- zone clock as it stands now.
+function World:ZoneKeyAt(arrive)
+	local index = self:FightAt(arrive)
+	if not index then
+		index = Rules.ZoneIndex(self.tuning, math.max(0, arrive - self.paused))
+	end
+	return self:ZoneKey(math.max(index, self.zoneIndex))
+end
+
 function World:AddEntity(role, lane, arrive, z)
 	self.nextId = self.nextId + 1
 	local entity = {
 		id = self.nextId,
 		role = role,
 		lane = lane,
+		-- Drawn with the models of the zone it's met in, not the one it was
+		-- spawned from: chunks are placed well ahead, across zone changes.
+		zoneKey = self:ZoneKeyAt(arrive),
 		x = self.tuning.lanes[lane],
 		z = z or 0,
 		arrive = arrive,
@@ -400,12 +421,14 @@ function World:SpawnAlliance(items, start, arrive, zone)
 	local blocked = {}
 	for _, item in ipairs(items) do
 		local at = start + item.t
-		if SOLID[item.code] and at >= from then
+		-- A charger closes faster than the road does, so it starts further off
+		-- and can cross their stretch whenever it's due: its lane is always out.
+		if SOLID[item.code] and (at >= from or item.code == "C") then
 			blocked[item.lane] = true
 		end
 	end
 	for _, entity in ipairs(self.entities) do
-		if SOLID_ROLE[entity.role] and entity.arrive >= from then
+		if SOLID_ROLE[entity.role] and (entity.arrive >= from or entity.role == "charger") then
 			blocked[entity.lane] = true
 		end
 	end
@@ -785,6 +808,7 @@ end
 function World:Crash(entity)
 	self.over = true
 	self.crashRole = entity.role
+	self.crashId = entity.id
 	self.crashZoneKey = self.zoneKey
 	self.runner:Crash()
 	self:Emit({ type = "crash", role = entity.role })

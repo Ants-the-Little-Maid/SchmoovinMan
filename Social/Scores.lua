@@ -40,6 +40,14 @@ function Scores.Add(world)
 		-- An orc run (Data/OrcRun.lua), shown with a candle.
 		orc = world.mode == "orc" or nil,
 	}
+	-- This character's own best, kept even when other characters fill the top 10.
+	local name = entry.character
+	if name then
+		local best = ns.db.bests[name]
+		if not best or entry.score > best.score then
+			ns.db.bests[name] = entry
+		end
+	end
 	local list = ns.db.scores
 	tinsert(list, entry)
 	table.sort(list, ByScore)

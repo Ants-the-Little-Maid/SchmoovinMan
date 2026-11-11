@@ -6,6 +6,9 @@ local DEFAULTS = {
 	version = DB_VERSION,
 	-- Personal top 10, shared across characters.
 	scores = {},
+	-- Each character's own best run, by name: it may not be in the shared top
+	-- 10, and it's the one that character shares with its guild.
+	bests = {},
 	-- Guild boards: guild key -> { [player] = best }.
 	guild = {},
 	-- Characters whose first-name-only runs were moved to their full name.
@@ -18,6 +21,9 @@ local DEFAULTS = {
 		startSpeed = 11,
 		-- A 3-2-1 countdown before a paused run goes on.
 		countdown = true,
+		-- A coloured mark on the road in front of each hazard (see
+		-- Renderer:AddHazardMarker). Off unless turned on in Options.
+		markers = false,
 	},
 	-- Models picked in Options, by zone key and role: the candidate's key
 	-- (see ns.Models.Key in Render/Models.lua), shown first in place of the
@@ -198,6 +204,7 @@ local function PrintHelp()
 	print("  /schmoove duck - turn ducking on or off (off swaps high bars for blocks)")
 	print("  /schmoove zones 15|25|35|45 - seconds per zone (shorter is harder)")
 	print("  /schmoove speed 8|11|14 - starting speed (slower scores less, faster more)")
+	print("  /schmoove markers - turn the coloured marks under hazards on or off")
 	print("  /schmoove options - open the options")
 end
 
@@ -232,6 +239,16 @@ function ns.SetCountdown(enabled)
 	ns.db.settings.countdown = enabled and true or false
 end
 
+-- Hazard markers apply straight away too.
+function ns.SetMarkers(enabled)
+	ns.db.settings.markers = enabled and true or false
+end
+
+ns.commands["markers"] = function()
+	ns.SetMarkers(not ns.db.settings.markers)
+	ns.Print("Hazard markers " .. (ns.db.settings.markers and "on: amber to jump, blue to duck, red to keep clear." or "off."))
+end
+
 ns.commands["sound"] = function()
 	ns.SetSound(not ns.db.settings.sound)
 	ns.Print("Sound " .. (ns.db.settings.sound and "on." or "off."))
@@ -242,12 +259,31 @@ ns.commands["duck"] = function()
 	ns.Print("Ducking " .. (ns.db.settings.duck and "on" or "off") .. ". Takes effect from your next run.")
 end
 
+-- True when `value` is one of the choices' `field` values. A missing or wrong
+-- number leaves the setting alone rather than putting it back to Normal.
+local function IsChoice(choices, field, value)
+	for _, choice in ipairs(choices) do
+		if choice[field] == tonumber(value) then
+			return true
+		end
+	end
+	return false
+end
+
 ns.commands["zones"] = function(rest)
+	if not IsChoice(ns.Tuning.zoneLengths, "seconds", rest) then
+		ns.Print(("Zones last %d seconds. Choose 15, 25, 35 or 45, as in /schmoove zones 35."):format(ns.Tuning.zoneLength))
+		return
+	end
 	local choice = ns.ChooseZoneLength(rest)
 	ns.Print(("Zones last %d seconds (%s). Takes effect from your next run."):format(choice.seconds, choice.name))
 end
 
 ns.commands["speed"] = function(rest)
+	if not IsChoice(ns.Tuning.startSpeeds, "speed", rest) then
+		ns.Print(("Runs start at %s. Choose 8, 11 or 14, as in /schmoove speed 14."):format(ns.StartSpeedText()))
+		return
+	end
 	local choice = ns.ChooseStartSpeed(rest)
 	ns.Print(("Runs start at %s. Takes effect from your next run."):format(ns.StartSpeedText(choice)))
 end
@@ -268,6 +304,19 @@ ns.commands["orc"] = function()
 		ns.Print("Orc runs forced on: every run is one until you turn it off or reload.")
 	else
 		ns.Print("Orc runs back to normal.")
+	end
+end
+
+-- Left out of the help: for working out why a creature sits off its lane.
+-- Lists the chargers and boss on screen with their measurements.
+ns.commands["measure"] = function()
+	local renderer = ns.Controller.renderer
+	local lines = renderer and renderer:Measurements() or {}
+	if #lines == 0 then
+		ns.Print("No charger or boss on screen. Pause with one in view, then try again.")
+	end
+	for _, line in ipairs(lines) do
+		ns.Print(line)
 	end
 end
 

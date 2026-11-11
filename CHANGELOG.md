@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.11.1 (2026-11-11)
+
+- Hazard markers: an Options setting (or `/schmoove markers`), off by default, that puts a coloured mark on the road under each hazard: amber to jump, blue to duck, red to keep clear.
+- Charging creatures and bosses stand in the middle of their lane. Some, in Un'Goro, Ashenvale and the Barrens, ran off to one side.
+- Game over now names what charged you in every zone, such as "Charged by a City guard", using the model that was on screen. The eight newer zones used to say "a beast".
+- A run that has just crashed is saved if you close the window or enter combat in the moment before the game-over screen. It used to pause, and Restart or Quit then lost the score.
+- `/schmoove zones` and `/schmoove speed` with a missing or wrong number now leave the setting alone and list the choices, instead of putting it back to Normal.
+- The first hazards after a zone change use the new zone's models, not the old zone's.
+- Guild board: a character's own best is shared even when your other characters hold all ten personal places.
+- Guild board: a score waiting to be sent is dropped if you leave the guild, instead of being retried for the rest of the session.
+- Alliance joggers no longer jog in a lane a charging creature is coming down.
+- The camera follows lane changes and flights at the same pace at any frame rate.
+- Less memory churn while running.
+
 ## 0.11.0 (2026-11-09)
 
 - Options: a settings screen in the game window, opened from the start and pause screens, the minimap menu or `/schmoove options`. It covers sound, ducking, zone length, starting speed, window size and the resume countdown. Opening it mid-run pauses the run.

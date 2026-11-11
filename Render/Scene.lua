@@ -210,6 +210,20 @@ function Scene.GetActorBounds(actor, activeOnly)
 		math.max(a[4], b[4]), math.max(a[5], b[5]), math.max(a[6], b[6])
 end
 
+-- The side-to-side middle of a model's box over all its animations, or nil.
+-- A creature's standing pose is often lopsided (a tail or head to one side)
+-- where this box, which takes in every swing of them, is even about its body.
+function Scene.GetMaxCenterY(actor)
+	if not actor.GetMaxBoundingBox then
+		return nil
+	end
+	local _, minY, _, _, maxY = ReadBox(actor:GetMaxBoundingBox())
+	if minY and maxY then
+		return (minY + maxY) / 2
+	end
+	return nil
+end
+
 function Scene:AcquireActor()
 	local actor = tremove(self.freeActors)
 	if not actor then

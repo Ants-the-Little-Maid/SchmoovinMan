@@ -49,6 +49,16 @@ local BOSS_LEAVE = 2.2
 -- altogether). In a fight the fog draws back until the boss is at most
 -- BOSS_FOG of the way into it.
 local BOSS_FOG = 0.15
+-- Road marks: red where a boss's throw will land, and the hazard markers'
+-- colours by what a hazard asks of you.
+local MARK_RED = { 0.88, 0.21, 0.16 }
+local MARK_COLOR = {
+	jump = { 0.94, 0.62, 0.15 },
+	duck = { 0.22, 0.54, 0.87 },
+	avoid = MARK_RED,
+}
+-- How far a hazard marker reaches past its hazard, front and back, in yards.
+local MARK_MARGIN = 0.6
 -- How high a thrown hazard arcs, in yards.
 local THROW_ARC = 4
 -- Posts that hold up high bars: plain fence posts, then a Tauren totem.
@@ -179,6 +189,8 @@ function Renderer.Create(scene, ground)
 	self.scenery = {}
 	self.joggers = {}
 	self.passes = {}
+	self.sparePasses = {}
+	self.seen = {}
 	self.joggerNext = 20
 	self.sceneryNext = 0
 	self.sceneryDistance = 0
@@ -314,7 +326,8 @@ function Renderer:CheckLoaded(record)
 		end
 		local minX, minY, minZ, maxX, maxY, maxZ = Scene.GetActorBounds(actor, CHARACTER[record.role])
 		if minX and (maxZ - minZ) > 0.01 then
-			self.bounds[record.key] = { minX, minY, minZ, maxX, maxY, maxZ }
+			-- For a creature, also where its body's middle is (see Fit).
+			self.bounds[record.key] = { minX, minY, minZ, maxX, maxY, maxZ, CHARACTER[record.role] and Scene.GetMaxCenterY(actor) or nil }
 			record.ready = true
 			return
 		end
@@ -405,6 +418,16 @@ function Renderer:Fit(record)
 	local centerX, centerY
 	if center then
 		centerX, centerY = (box[1] + box[4]) / 2, (box[2] + box[5]) / 2
+		-- A creature's standing box is lopsided wherever a tail, a turned head
+		-- or antlers reach further to one side (a devilsaur, a stag), so
+		-- centring on it pushed the animal off its lane. Nor can its pivot be
+		-- trusted: some models sit to one side of it (seen with the Barrens'
+		-- charger). Its body's middle is taken from its box over all its
+		-- animations, which is even about the body; failing that, its pivot.
+		-- Its length is still centred on the standing box, to match the hit box.
+		if CHARACTER[role] then
+			centerY = box[7] or 0
+		end
 	end
 	return scale, -box[3] * scale, yaw or 0, centerX, centerY
 end
@@ -453,30 +476,41 @@ end
 -- Hazards of the same kind side by side in one row are one barrier, so it's
 -- clear they block those lanes together. Each entity learns whether it joins
 -- the lane to its left or right.
-local GROUPED = { low = true, high = true, wall = true, block = true }
+local GROUPED = { low = 1, high = 2, wall = 3, block = 4 }
+
+-- One number per grouped hazard: its row (arrival, to the millisecond), kind
+-- and lane, so the lanes either side are the keys one below and one above.
+-- Lanes run 1 to 3 in a slot of 8, so a neighbour never lands on another
+-- kind. The table is reused, so this makes no garbage each frame.
+local groupAt = {}
+
+local function GroupKey(entity)
+	return (math.floor(entity.arrive * 1000 + 0.5) * 8 + GROUPED[entity.role]) * 8 + entity.lane
+end
 
 local function MarkGroups(entities)
-	local rows = {}
+	wipe(groupAt)
 	for _, entity in ipairs(entities) do
 		entity.joinLeft, entity.joinRight = nil, nil
 		if GROUPED[entity.role] and not entity.smashed then
-			local key = entity.role .. ":" .. math.floor(entity.arrive * 1000 + 0.5)
-			rows[key] = rows[key] or {}
-			rows[key][entity.lane] = entity
+			groupAt[GroupKey(entity)] = true
 		end
 	end
-	for _, lanes in pairs(rows) do
-		for lane, entity in pairs(lanes) do
-			entity.joinLeft = lanes[lane - 1] ~= nil
-			entity.joinRight = lanes[lane + 1] ~= nil
+	for _, entity in ipairs(entities) do
+		if GROUPED[entity.role] and not entity.smashed then
+			local key = GroupKey(entity)
+			entity.joinLeft = groupAt[key - 1] ~= nil
+			entity.joinRight = groupAt[key + 1] ~= nil
 		end
 	end
 end
 
 function Renderer:SyncEntities(world, zone, now)
-	local seen = {}
+	local seen = self.seen
+	wipe(seen)
 	local far = zone.fog.far + 5
 	MarkGroups(world.entities)
+	local hazardMarkers = ns.db.settings.markers == true
 	for _, entity in ipairs(world.entities) do
 		seen[entity.id] = true
 		local record = self.records[entity.id]
@@ -507,6 +541,8 @@ function Renderer:SyncEntities(world, zone, now)
 		if entity.thrown and entity.phase == "flying" then
 			local _, progress = ns.Rules.ThrowPhase(ns.Tuning, entity.y, self.speed or 0)
 			self:AddMarker(entity, entity.y, progress, far)
+		elseif hazardMarkers and entity.role ~= "tauren" and (not entity.thrown or entity.phase == "landed") then
+			self:AddHazardMarker(entity, far)
 		end
 	end
 	for id, record in pairs(self.records) do
@@ -652,6 +688,40 @@ function Renderer:AddMarker(entity, y, progress, far)
 	marker.halfWidth = (lanes[2] - lanes[1]) * 0.42
 	marker.halfDepth = 0.9
 	marker.alpha = (0.35 + 0.3 * progress) * Fade(y, far)
+	marker.r, marker.g, marker.b = MARK_RED[1], MARK_RED[2], MARK_RED[3]
+end
+
+-- Hazard markers (an Options setting, off by default): a mark on the road
+-- under each hazard, in the colour of what it asks of you. It's nearly the
+-- width of the lane and reaches a little past the hazard front and back, so
+-- it shows around the model standing on it.
+function Renderer:AddHazardMarker(entity, far)
+	local color = MARK_COLOR[ns.Rules.REQUIREMENT[entity.role]]
+	local shape = ns.Rules.SHAPES[entity.role]
+	local y = entity.y
+	if not (color and shape) or entity.smashed then
+		return
+	end
+	local halfDepth = shape.halfDepth + MARK_MARGIN
+	if y < -halfDepth or y > far then
+		return
+	end
+	local markers = self.markers
+	markers.count = markers.count + 1
+	local marker = markers[markers.count]
+	if not marker then
+		marker = {}
+		markers[markers.count] = marker
+	end
+	local lanes = ns.Tuning.lanes
+	-- Side by side, the marks of one barrier meet, as its pieces do.
+	local joined = entity.joinLeft or entity.joinRight
+	marker.x = entity.x
+	marker.halfWidth = (lanes[2] - lanes[1]) * (joined and 0.5 or 0.46)
+	marker.halfDepth = halfDepth
+	marker.y = y
+	marker.alpha = 0.6 * Fade(y, far)
+	marker.r, marker.g, marker.b = color[1], color[2], color[3]
 end
 
 -- Boss ------------------------------------------------------------------------------
@@ -984,9 +1054,12 @@ function Renderer:UpdateScenery(world, zone)
 		end
 	end
 
-	local keep = {}
+	-- Compacted in place: kept pieces slide down, so no list is made each frame.
+	local scenery = self.scenery
+	local count, kept = #scenery, 0
 	local gone = self.view.behind - 4
-	for _, record in ipairs(self.scenery) do
+	for index = 1, count do
+		local record = scenery[index]
 		record.y = record.y - moved
 		if record.y < gone or record.failed then
 			self:FreeRecord(record)
@@ -1003,10 +1076,13 @@ function Renderer:UpdateScenery(world, zone)
 			else
 				record.actor:SetAlpha(0)
 			end
-			tinsert(keep, record)
+			kept = kept + 1
+			scenery[kept] = record
 		end
 	end
-	self.scenery = keep
+	for index = kept + 1, count do
+		scenery[index] = nil
+	end
 end
 
 -- Joggers ------------------------------------------------------------------------
@@ -1041,8 +1117,10 @@ function Renderer:UpdateJoggers(world, zone, moved, now)
 		end
 	end
 
-	local keep = {}
-	for _, record in ipairs(self.joggers) do
+	local joggers = self.joggers
+	local count, kept = #joggers, 0
+	for index = 1, count do
+		local record = joggers[index]
 		local before = record.y
 		record.y = record.y - moved * relative
 		-- An exchange (Tauren, famous faces) starts a little before you reach
@@ -1068,18 +1146,31 @@ function Renderer:UpdateJoggers(world, zone, moved, now)
 			else
 				record.actor:SetAlpha(0)
 			end
-			tinsert(keep, record)
+			kept = kept + 1
+			joggers[kept] = record
 		end
 	end
-	self.joggers = keep
+	for index = kept + 1, count do
+		joggers[index] = nil
+	end
 end
 
 -- Joggers overtaken since the last call (each has .side -1 or 1 and .race,
--- and famous faces .name, .lines and .replies).
+-- and famous faces .name, .lines and .replies). The list is only good until
+-- the next call: two lists take turns, so none is made each frame.
 function Renderer:TakePasses()
 	local passes = self.passes
-	self.passes = {}
+	wipe(self.sparePasses)
+	self.passes, self.sparePasses = self.sparePasses, passes
 	return passes
+end
+
+-- The name of the model an entity is drawn with (the one that loaded, which
+-- may be a backup or an Options pick), or nil if it has none.
+function Renderer:EntityModelName(id)
+	local record = id and self.records[id]
+	local candidate = record and not record.failed and record.candidate
+	return candidate and candidate.name or nil
 end
 
 -- Screen position above a jogger's head, or nil once they've left the view.
@@ -1153,7 +1244,7 @@ function Renderer:Reset(mode)
 	self.fogLift = 0
 	-- The camera starts each run in place, not still easing down from the
 	-- last run's flight or across from its lane.
-	self.camX, self.camZ = nil, nil
+	self.camX, self.camZ, self.lastCameraAt = nil, nil, nil
 	self.markers.count = 0
 	self.ground:DrawMarkers(self.markers)
 	self.lastRunnerX = nil
@@ -1175,10 +1266,15 @@ function Renderer:Update(world, now)
 	end
 	local fight = self:UpdateFightView(now)
 	local base = self.view.camera
-	-- Camera eases toward the runner's lane and rises in flight.
-	local camX = (self.camX or 0) + (state.x * 0.55 - (self.camX or 0)) * 0.12
+	-- Camera eases toward the runner's lane and rises in flight. The shares
+	-- are those of one frame at 60 a second, scaled by the time that passed,
+	-- so it moves the same at any frame rate.
+	local frames = math.min(1 / 15, now - (self.lastCameraAt or (now - 1 / 60))) * 60
+	self.lastCameraAt = now
+	local easeX, easeZ = 1 - 0.88 ^ frames, 1 - 0.92 ^ frames
+	local camX = (self.camX or 0) + (state.x * 0.55 - (self.camX or 0)) * easeX
 	local baseZ = CameraSetting("height", fight, base)
-	local camZ = (self.camZ or baseZ) + ((state.flying and state.z + 1.5 or baseZ + state.z * 0.3) - (self.camZ or baseZ)) * 0.08
+	local camZ = (self.camZ or baseZ) + ((state.flying and state.z + 1.5 or baseZ + state.z * 0.3) - (self.camZ or baseZ)) * easeZ
 	self.camX, self.camZ = camX, camZ
 	self.scene:SetFieldOfView(CameraSetting("fov", fight, base))
 	self.scene:LookAt(camX, CameraSetting("lookAhead", fight, base), camZ, CameraSetting("distance", fight, base), CameraSetting("pitch", fight, base))
@@ -1201,6 +1297,28 @@ function Renderer:Update(world, now)
 	end
 	self.ground:Draw(world.distance)
 	self.ground:DrawMarkers(self.markers)
+end
+
+-- For working out why a creature sits off its lane: one line for each charger
+-- and boss on screen, with its model, where the middle of its standing box
+-- and of its all-animation box are (model yards, side to side), its scale and
+-- how far it's shifted to centre it.
+function Renderer:Measurements()
+	local lines = {}
+	local function Add(record)
+		local box = record and record.key and self.bounds[record.key]
+		if box and (record.role == "charger" or record.role == "boss") then
+			local scale = self:Fit(record)
+			lines[#lines + 1] = ("%s %s (%s): standing box %.2f to %.2f (middle %.2f), all-animation middle %s, scale %.2f, shifted %.2f yd"):format(
+				record.role, record.candidate.name or "?", record.key, box[2], box[5], (box[2] + box[5]) / 2,
+				box[7] and ("%.2f"):format(box[7]) or "none", scale, (box[7] or 0) * scale)
+		end
+	end
+	for _, record in pairs(self.records) do
+		Add(record)
+	end
+	Add(self.bossRecord)
+	return lines
 end
 
 -- Reports models that never loaded, once per run.

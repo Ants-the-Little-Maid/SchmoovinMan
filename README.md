@@ -24,6 +24,7 @@ Open it with `/schmoove` or the kodo button on the minimap. Right-click the butt
 - **Scores**: a personal top 10 shared across your characters, plus a guild board with guildmates who have the addon.
 - **Your pace**: zones last 15, 25, 35 or 45 seconds, and runs start slow (8 yd/s, scores x0.75), normal (11) or fast (14, scores x1.25). The window comes in four sizes.
 - **Options** in the game window (the start and pause screens, or `/schmoove options`): sound, ducking, zone length, starting speed, window size and a 3-2-1 countdown before a paused run goes on.
+- **Hazard markers**: turn them on in Options for a coloured mark on the road under each hazard: amber to jump, blue to duck, red to keep clear.
 - **Easier to see**: if a hazard, charger, coin or gem is hard to see in some zone, swap it in Options for another, with a turning preview. Each zone offers its own models plus brighter picks such as powder kegs, a barricade, red and blue jewels and a large gold pile.
 
 Every run is fair: there is always a free lane or a way to jump or duck through. The addon's tests check this on long simulated runs.
@@ -51,6 +52,7 @@ You can't start a run in combat, and entering combat pauses the run. Only the ga
 | `/schmoove speed 8`, `11` or `14` | Starting speed; slow scores x0.75, fast x1.25 |
 | `/schmoove duck` | Turn ducking off (high bars become blocks) or back on |
 | `/schmoove sound` | Turn sound on or off |
+| `/schmoove markers` | Turn the coloured marks under hazards on or off |
 
 ## Requirements
 
