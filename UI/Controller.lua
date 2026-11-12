@@ -33,6 +33,8 @@ function Controller:Build()
 	self.bubble = ns.Bubble.Create(frame.hudLayer)
 	-- A second bubble, for a Tauren jogger's reply.
 	self.replyBubble = ns.Bubble.Create(frame.hudLayer)
+	-- An escort's shouts, over their head.
+	self.escortBubble = ns.Bubble.Create(frame.hudLayer)
 	-- Orc runs: Tauren yell as they pass, several on screen at once.
 	self.taurenBubbles = {}
 	for index = 1, 3 do
@@ -365,6 +367,10 @@ function Controller:HandleEvents(now)
 	local world = self.world
 	for _, event in ipairs(world:DrainEvents()) do
 		local kind = event.type
+		if event.gift then
+			-- The escort cheers a gift caught, as soon as they can.
+			self.escortCheer = true
+		end
 		if kind == "collect" then
 			ns.PlaySound(event.role == "gem" and "gem" or "coin")
 		elseif kind == "powerup" then
@@ -374,6 +380,10 @@ function Controller:HandleEvents(now)
 		elseif kind == "knock" then
 			ns.PlaySound("knock")
 			self:SayKnock()
+		elseif kind == "escortStart" then
+			-- A leader in place of a boss: on your side.
+			ns.PlaySound("bossSurvived")
+			self.hud:ShowMessage("won", "HERE TO HELP", event.name, "Runs ahead throwing gifts: catch them!", now)
 		elseif kind == "bossStart" then
 			ns.PlaySound("bossStart")
 			self.hud:ShowMessage("boss", "BOSS", event.name, string.format("Grab %d spears to drive them off, or survive %d seconds", event.needed, event.limit), now)
@@ -414,6 +424,8 @@ end
 function Controller:OnUpdate(elapsed)
 	local now = GetTime()
 	self:UpdatePauseButton()
+	-- A check of every charger (/schmoove measure all) runs whatever's on screen.
+	self.renderer:UpdateChargerCheck(now)
 	local world = self.world
 	if not world then
 		return
@@ -470,6 +482,8 @@ function Controller:HideBubbles()
 	self.bubble:Hide()
 	self.replyBubble:Hide()
 	self.pendingReply = nil
+	self.escortBubble:Hide()
+	self.escortNext, self.escortCheer = nil, nil
 	for _, bubble in ipairs(self.taurenBubbles) do
 		bubble:Hide()
 	end
@@ -594,8 +608,54 @@ function Controller:UpdateQuips()
 		end
 	end
 
+	self:UpdateEscortQuips()
 	self.bubble:Update(world.time)
 	self.replyBubble:Update(world.time)
+	self.escortBubble:Update(world.time)
+end
+
+-- An escort shouts encouragement over their head: a first line once they're
+-- in place, then one every so often, and a cheer when you catch a gift.
+-- Half the time a line of their own, otherwise one anyone might shout.
+function Controller:UpdateEscortQuips()
+	local world = self.world
+	local escort = world.escort
+	if not escort or self.state ~= "running" then
+		if not escort then
+			self.escortNext, self.escortCheer = nil, nil
+		end
+		return
+	end
+	local quips = ns.Assets.quips
+	local lines = quips.escort
+	self.escortNext = self.escortNext or world.time + lines.firstDelay
+	local renderer = self.renderer
+	if self.escortBubble:IsShown() or not renderer:EscortHeadPoint() then
+		return
+	end
+	local cheer = self.escortCheer
+	if not cheer and world.time < self.escortNext then
+		return
+	end
+	self.escortCheer = nil
+	local own = lines[escort.name]
+	local list
+	if cheer then
+		list = lines.caught
+	elseif own and math.random() < 0.5 then
+		list = own
+	else
+		list = lines.general
+	end
+	local head = self.escortHead
+	if not head then
+		head = function()
+			return renderer:EscortHeadPoint()
+		end
+		self.escortHead = head
+	end
+	self.escortBubble:Say(list[math.random(#list)], world.time + quips.duration, head)
+	self.escortNext = world.time + quips.duration + lines.gap
 end
 
 -- Keyboard ------------------------------------------------------------------------

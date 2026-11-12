@@ -13,6 +13,9 @@ local Scene = ns.Scene
 -- Seconds to wait for a model before trying the next one. Generous, because a
 -- first visit streams models in slowly; giving up early swapped in backups.
 local LOAD_TIMEOUT = 10
+-- A boss gets less: its fight is short, and one that isn't there by now is
+-- better swapped for its backup than waited for.
+local BOSS_LOAD_TIMEOUT = 3
 -- Longest wait for the geometry-ready signal before measuring anyway.
 local GEO_WAIT = 1
 -- Longest wait for an outfit's item to load, from the first try-on, before
@@ -73,8 +76,14 @@ local PIT_COLOR = { 0.04, 0.03, 0.02 }
 local PIT_RIM = { 0.95, 0.85, 0.55 }
 local PIT_WALL = { 0.36, 0.25, 0.16 }
 local PIT_SIDE = { 0.2, 0.14, 0.09 }
-local PIT_FLOOR = { 0.55, 0.1, 0.02 }
-local PIT_GLOW = { 1, 0.55, 0.1 }
+-- What's at the bottom where a zone doesn't say (zone.pit, Data/Zones.lua).
+local PIT_FIRE = { floor = { 0.55, 0.1, 0.02 }, glow = { 1, 0.55, 0.1 } }
+-- The zone's ground texture over the bottom and the far wall: how strongly
+-- it shows, how dark the wall's is, and the yards one tile of it covers.
+local PIT_GRAIN = 0.45
+local PIT_WALL_SHADE = { 0.6, 0.6, 0.6 }
+local PIT_TILE = 8
+local WHITE = { 1, 1, 1 }
 local RAMP = { length = 2.6, height = 1.3 }
 local RAMP_TOP = { 0.64, 0.46, 0.26 }
 local RAMP_SIDE = { 0.33, 0.22, 0.12 }
@@ -85,6 +94,10 @@ local VENT_COLOR = { 1, 0.42, 0.08 }
 local GRATE_COLOR = { 0.13, 0.13, 0.15 }
 local GRATE_BAR = { 0.5, 0.5, 0.55 }
 local STEAM_COLOR = { 0.96, 0.98, 1 }
+-- A crosswind (Thousand Needles' twist): WIND_STREAKS pale streaks blowing
+-- across the road and over it, each a bright head with a fading tail.
+local WIND_STREAKS = 14
+local WIND_COLOR = { 1, 0.97, 0.88 }
 local WISP_COLOR = { 0.5, 1, 0.75 }
 local WISP_CORE = { 1, 1, 1 }
 -- An escort (a zone's twist): seconds it takes to come up from behind the
@@ -170,6 +183,11 @@ local function FightCameraToBoss()
 	return math.sqrt((ns.Tuning.boss.distance - y) ^ 2 + z * z)
 end
 local HALF_PI = math.pi / 2
+-- Seconds a charger runs before its running box is measured, so the game has
+-- switched its box to the run.
+local RUN_MEASURE_DELAY = 0.3
+-- Where the runner sits on the wind rider: this share of its height up.
+local MOUNT_SEAT = 0.6
 
 -- Target sizes per role, in yards: height, lateral width, lift off the ground.
 -- Kept well inside a 2.6-yard lane and low enough to see the road past them.
@@ -276,11 +294,13 @@ function Renderer:LoadCandidate(record)
 	end
 end
 
-function Renderer:MarkBad(record)
+-- passing: true when the model may only be slow (a boss's short wait), so
+-- it's tried again next time rather than written off.
+function Renderer:MarkBad(record, passing)
 	-- A copied character can fail for a passing reason (still streaming in
 	-- after a loading screen), so it's tried again next time rather than
 	-- remembered, and isn't reported as a missing model.
-	if record.candidate and record.candidate.unit then
+	if passing or (record.candidate and record.candidate.unit) then
 		record.index = record.index + 1
 		self:LoadCandidate(record)
 		return
@@ -374,7 +394,11 @@ function Renderer:CheckLoaded(record)
 			return
 		end
 	end
-	if GetTime() - record.startedAt > LOAD_TIMEOUT then
+	if record.role == "boss" and GetTime() - record.startedAt > BOSS_LOAD_TIMEOUT then
+		-- The backup is shown, but the model isn't written off: it may only be
+		-- streaming in slowly (or the window was shut while it loaded).
+		self:MarkBad(record, true)
+	elseif GetTime() - record.startedAt > LOAD_TIMEOUT then
 		self:MarkBad(record)
 	end
 end
@@ -421,6 +445,9 @@ function Renderer:Fit(record)
 		scale = Assets.joggerHeight / sizeZ
 	elseif role == "windRider" then
 		scale = Assets.windRiderLength / math.max(sizeX, sizeY)
+		-- Centred under the runner by its body, not its pivot, which can sit
+		-- well off it (it showed below the view, apart from the runner).
+		center = true
 	elseif role == "boss" then
 		-- Faces you, like a charger: its side-to-side size is the model's y.
 		scale = math.min((record.height or 3) / sizeZ, BOSS_WIDTH / math.max(sizeY, 0.05))
@@ -467,8 +494,12 @@ function Renderer:Fit(record)
 		-- charger). Its body's middle is taken from its box over all its
 		-- animations, which is even about the body; failing that, its pivot.
 		-- Its length is still centred on the standing box, to match the hit box.
+		-- A charger is centred on its box while running (runY, measured once
+		-- it runs), which is what's on screen: the all-animation box takes in
+		-- attacks and deaths too, and for Un'Goro's devilsaur that pushed it
+		-- 0.17 yards off its lane.
 		if CHARACTER[role] then
-			centerY = box[7] or 0
+			centerY = box.runY or box[7] or 0
 		end
 	end
 	return scale, -box[3] * scale, yaw or 0, centerX, centerY
@@ -654,7 +685,16 @@ function Renderer:DrawEntity(record, entity, far, now)
 		yaw = -HALF_PI
 		if not record.animated then
 			actor:SetAnimation(Assets.anims.creatureRun[1], nil, 1.4)
-			record.animated = true
+			record.animated = now
+		end
+		-- Once it has been running a moment, its box is the run's: measured
+		-- once for each model, and shared by every charger that uses it.
+		local box = self.bounds[record.key]
+		if box and not box.runY and now - record.animated > RUN_MEASURE_DELAY then
+			local _, minY, _, _, maxY = Scene.GetActorBounds(actor, true)
+			if minY and maxY then
+				box.runY = (minY + maxY) / 2
+			end
 		end
 	elseif role == "tauren" then
 		-- Running past you up the road, their stride quickening with their speed.
@@ -775,7 +815,7 @@ function Renderer:NextMarker(x, y, halfWidth, halfDepth, alpha, color)
 	marker.halfWidth, marker.halfDepth = halfWidth, halfDepth
 	marker.alpha = alpha
 	marker.r, marker.g, marker.b = color[1], color[2], color[3]
-	marker.quad, marker.fade, marker.glow = nil, nil, nil
+	marker.quad, marker.fade, marker.glow, marker.tex, marker.level = nil, nil, nil, nil, nil
 	return marker
 end
 
@@ -826,12 +866,27 @@ function Renderer:AddHazardMarker(entity, far)
 	self:NextMarker(entity.x, y, LaneHalfWidth(entity), halfDepth, 0.6 * Fade(y, far), color)
 end
 
+-- A patch of a zone's ground texture in space: the part of one tile from
+-- u1, v1 at its far-left corner to u2, v2 at its near-right one.
+function Renderer:NextTile(file, alpha, color, u1, v1, u2, v2, ...)
+	local marker = self:NextQuad(alpha, color, ...)
+	marker.tex = file
+	marker.u1, marker.v1, marker.u2, marker.v2 = u1, v1, u2, v2
+	return marker
+end
+
 -- A pit: right across the road from its near edge to its far one, as much of
 -- it as is in view. A pale rim first, so the hole shows on a dark road too,
 -- then the opening, then what shows of its inside. Looking down past the
 -- near edge, the floor comes into sight `reach` yards in; on a pit still far
 -- off that's past its far edge, and only the top of the far wall shows.
+-- What's down it is its zone's (zone.pit): a colour for the bottom, with
+-- the zone's ground texture over it in tiles fixed to the road, and bands of
+-- another colour that stream by.
 function Renderer:AddPit(entity, world, far, now)
+	local zone = ns.ZonesByKey[entity.zoneKey] or self.zone
+	local theme = zone and zone.pit or PIT_FIRE
+	local grain = zone and zone.ground
 	local near = math.max(entity.y, self.view.behind)
 	local trueFar = (entity.leave - world.time) * world.speed
 	local farEdge = math.min(trueFar, far)
@@ -854,13 +909,27 @@ function Renderer:AddPit(entity, world, far, now)
 		depth, floorFrom = PIT_DEPTH * length / reach, farEdge
 	end
 	if floorFrom < farEdge - 0.3 then
-		self:NextQuad(fade, PIT_FLOOR, -road, farEdge, -depth, -road, floorFrom, -depth, road, floorFrom, -depth, road, farEdge, -depth)
-		-- Brighter bands across the fire, fixed to the road so they stream by.
+		self:NextQuad(fade, theme.floor, -road, farEdge, -depth, -road, floorFrom, -depth, road, floorFrom, -depth, road, farEdge, -depth)
+		-- The ground texture over it: rows of tiles from the pit's near edge,
+		-- two across, each cut off where the floor goes out of sight.
+		local row = entity.y
+		while grain and row < farEdge do
+			local from, to = math.max(row, floorFrom), math.min(row + PIT_TILE, farEdge)
+			if to - from > 0.05 then
+				local v1, v2 = 1 - (to - row) / PIT_TILE, 1 - (from - row) / PIT_TILE
+				local u = road / PIT_TILE
+				self:NextTile(grain, PIT_GRAIN * fade, WHITE, 0, v1, u, v2, -road, to, -depth, -road, from, -depth, 0, from, -depth, 0, to, -depth)
+				self:NextTile(grain, PIT_GRAIN * fade, WHITE, 0, v1, u, v2, 0, to, -depth, 0, from, -depth, road, from, -depth, road, to, -depth)
+			end
+			row = row + PIT_TILE
+		end
+		-- Brighter bands across the bottom, fixed to the road so they stream by.
 		local band, y = 0, entity.y + 3
 		while y < farEdge - 0.6 and band < 12 do
 			if y > floorFrom + 0.6 then
 				local glow = (0.4 + 0.3 * math.sin(now * 4 + band * 1.7)) * fade
-				self:NextQuad(glow, PIT_GLOW, -road * 0.9, y + 0.5, -depth, -road * 0.9, y - 0.5, -depth, road * 0.9, y - 0.5, -depth, road * 0.9, y + 0.5, -depth)
+				local mark = self:NextQuad(glow, theme.glow, -road * 0.9, y + 0.5, -depth, -road * 0.9, y - 0.5, -depth, road * 0.9, y - 0.5, -depth, road * 0.9, y + 0.5, -depth)
+				mark.level = 1
 			end
 			band, y = band + 1, y + 5
 		end
@@ -870,6 +939,12 @@ function Renderer:AddPit(entity, world, far, now)
 	-- The far wall, once the pit's far edge is out of the fog.
 	if trueFar <= far then
 		self:NextQuad(fade, PIT_WALL, -road, farEdge, 0, -road, farEdge, -depth, road, farEdge, -depth, road, farEdge, 0)
+		if grain then
+			-- The top strip of a tile on each half, as deep as the wall shows.
+			local v2, u = depth / PIT_TILE, road / PIT_TILE
+			self:NextTile(grain, fade, PIT_WALL_SHADE, 0, 0, u, v2, -road, farEdge, 0, -road, farEdge, -depth, 0, farEdge, -depth, 0, farEdge, 0)
+			self:NextTile(grain, fade, PIT_WALL_SHADE, 0, 0, u, v2, 0, farEdge, 0, 0, farEdge, -depth, road, farEdge, -depth, road, farEdge, 0)
+		end
 	end
 end
 
@@ -888,6 +963,7 @@ function Renderer:AddRamp(entity, world, far, now)
 	local x, height, length = entity.x, RAMP.height, RAMP.length
 	local half = ns.Rules.SHAPES.ramp.halfWidth
 	local left, right = x - half, x + half
+	local first = self.markers.count + 1
 	self:NextQuad(fade, RAMP_SIDE, left, top, height, left, foot, 0, left, foot, 0, left, top, 0)
 	self:NextQuad(fade, RAMP_SIDE, right, top, height, right, foot, 0, right, foot, 0, right, top, 0)
 	self:NextQuad(fade, RAMP_TOP, left, top, height, left, foot, 0, right, foot, 0, right, top, height)
@@ -906,6 +982,10 @@ function Renderer:AddRamp(entity, world, far, now)
 		local y4, z4 = foot + (tail + arm + thick) * length, (tail + arm + thick) * height
 		self:NextQuad(alpha, RAMP_ARROW, x - wide, y2, z2, x - wide, y1, z1, x, y3, z3, x, y4, z4)
 		self:NextQuad(alpha, RAMP_ARROW, x, y4, z4, x, y3, z3, x + wide, y1, z1, x + wide, y2, z2)
+	end
+	-- A ramp stands over everything in its pit.
+	for index = first, self.markers.count do
+		self.markers[index].level = 2
 	end
 end
 
@@ -927,6 +1007,48 @@ function Renderer:AddSteam(entity, far, now)
 		local puff = self:NextQuad((1 - phase) * 0.8 * fade, STEAM_COLOR,
 			x - half, y, bottom + 1.3, x - half, y, bottom, x + half, y, bottom, x + half, y, bottom + 1.3)
 		puff.fade = true
+	end
+end
+
+-- Wind streaks blowing across the road the way the crosswind blows. Each
+-- streak keeps its own height, distance and speed, crossing from one side of
+-- the view to the other; distances are fixed to the road, so they stream by
+-- as you run. They thin out over the last second before the wind turns and
+-- come back blowing the other way. They follow the run's clock, so they hold
+-- still while paused, as the sandstorm's gusts do.
+function Renderer:AddWind(world, far)
+	local direction, turnsIn = world:Wind()
+	if not direction then
+		return
+	end
+	local every = world:Twist().driftEvery
+	local since = every - turnsIn
+	local strength = math.min(1, since / 0.6, turnsIn / 0.8)
+	if strength <= 0 then
+		return
+	end
+	local span = RoadHalf() + 10
+	for index = 1, WIND_STREAKS do
+		-- Fixed numbers for each streak, from its index.
+		local a, b, c = (index * 0.6180339) % 1, (index * 0.4142136) % 1, (index * 0.7320508) % 1
+		local y = 3 + ((b * 45 - world.distance * 0.35) % 45)
+		local z = 0.4 + c * 3.2
+		local speed = 0.45 + 0.35 * c
+		local across = ((a + world.time * speed) % 1) * 2 - 1
+		local head = direction * across * span
+		local length = 2 + 2 * b
+		local fade = Fade(y, far) * strength * math.min(1, (1 - math.abs(across)) * 4)
+		-- Three pieces, faintest at the tail.
+		for piece = 0, 2 do
+			local from = head - direction * length * (piece + 1) / 3
+			local to = head - direction * length * piece / 3
+			local thick = 0.05 - 0.012 * piece
+			local alpha = (0.55 - 0.17 * piece) * fade
+			if alpha > 0.01 then
+				self:NextQuad(alpha, WIND_COLOR, math.min(from, to), y, z + thick, math.min(from, to), y, z - thick,
+					math.max(from, to), y, z - thick, math.max(from, to), y, z + thick).level = 2
+			end
+		end
 	end
 end
 
@@ -1100,12 +1222,11 @@ function Renderer:FreeEscort()
 	self.escortX, self.escortY, self.escortHandZ, self.escortThrowAt = nil, nil, nil, nil
 end
 
--- A zone whose twist is an escort: a famous face runs ahead of you beside
+-- A leader standing in for a boss: a famous face runs ahead of you beside
 -- the road, throwing gifts back into your lanes. It comes up out of the fog
--- when the zone starts and runs off ahead when it ends.
+-- when it turns up (in place of a boss) and runs off ahead when its zone ends.
 function Renderer:DrawEscort(world, far, now)
-	local twist = world.Twist and world:Twist()
-	local name = twist and twist.escort or nil
+	local name = world.escort and world.escort.name or nil
 	local record = self.escort
 	if record and record.name ~= name and not record.leftAt then
 		record.leftAt = now
@@ -1254,7 +1375,6 @@ function Renderer:UpdateMount(world)
 	local runner = world.runner
 	if runner.flying and not self.mount then
 		self.mount = self:NewRecord(Assets.windRider, "windRider")
-		self.mountAttached = false
 	elseif not runner.flying and self.mount and runner.z < 0.5 then
 		self:Dismount()
 	end
@@ -1268,31 +1388,17 @@ function Renderer:UpdateMount(world)
 	end
 end
 
--- Takes the runner off the wind rider. Riding leaves the runner's actor
--- scaled by the mount even after detaching, so the runner gets a fresh actor
--- and the old one is retired rather than pooled, where it would make some
--- later jogger or prop huge.
+-- Takes the runner off the wind rider. The runner is never attached to it
+-- (the game's AttachToMount left the runner apart from the wyvern and facing
+-- back at the camera in Forever), only placed on its back, so its own actor
+-- carries on as it was.
 function Renderer:Dismount()
 	local mount = self.mount
 	if not mount then
 		return
 	end
-	local runner = self.runner
-	if self.mountAttached and runner then
-		pcall(mount.actor.DetachFromMount, mount.actor, runner.actor)
-	end
-	-- The new runner is made before the mount goes back to the pool, so it
-	-- can't be handed the actor that was just the mount.
-	if self.mountAttachTried and runner then
-		runner.actor:ClearModel()
-		runner.actor:Hide()
-		self.runner = nil
-		self:SetupRunner()
-	end
 	self:FreeRecord(mount)
 	self.mount = nil
-	self.mountAttached = false
-	self.mountAttachTried = false
 	self.runnerAnim = nil
 end
 
@@ -1314,21 +1420,19 @@ function Renderer:DrawRunner(world, now)
 
 	local mount = self.mount
 	if mount and mount.ready then
-		local mountScale, mountZ = self:Fit(mount)
-		local mx, mz = state.x, math.max(state.z - 1.2, 0)
-		self.scene:Place(mount.actor, mx, 0, mz + mountZ, HALF_PI, mountScale, 0, lean)
-		mount.actor:SetAlpha(1)
-		if not self.mountAttached and not self.mountAttachTried then
-			self.mountAttachTried = true
-			local ok, attached = pcall(mount.actor.AttachToMount, mount.actor, runner.actor, Assets.anims.mount[1])
-			self.mountAttached = ok and attached ~= false
-		end
-		if self.mountAttached then
-			runner.actor:SetAlpha(1)
-			return
-		end
+		-- The wyvern flies under the runner, its body centred on the runner's
+		-- spot and its back MOUNT_SEAT of its height up, where the runner sits
+		-- in the riding pose, both facing up the road.
+		local mountScale, mountZ, _, centerX, centerY = self:Fit(mount)
+		local box = self.bounds[mount.key]
+		local seat = (box[6] - box[3]) * mountScale * MOUNT_SEAT
+		-- The runner rides at its own height all the way up and down, so the
+		-- wyvern dips under the road for a moment at take-off and landing.
+		local mz = state.z - seat
+		self.scene:Place(mount.actor, state.x, 0, mz + mountZ, HALF_PI, mountScale, 0, lean, centerX, centerY)
+		mount.actor:SetAlpha(seat > 0 and math.max(0, math.min(1, state.z / seat)) or 1)
 		self:PlayRunner("mount")
-		self.scene:Place(runner.actor, state.x, -0.2, state.z + zOffset + 0.4, HALF_PI, scale, 0, lean)
+		self.scene:Place(runner.actor, state.x, 0, state.z + zOffset, HALF_PI, scale, 0, lean)
 		runner.actor:SetAlpha(1)
 		return
 	end
@@ -1506,6 +1610,16 @@ function Renderer:EntityHeadPoint(entity)
 	return self.scene:Project(entity.x, entity.y, Assets.runnerHeight + 0.4)
 end
 
+-- Screen position above the escort's head, or nil while it isn't there
+-- (still loading, or running off).
+function Renderer:EscortHeadPoint()
+	local record = self.escort
+	if not (record and record.ready and self.escortY) or record.leftAt then
+		return nil
+	end
+	return self.scene:Project(self.escortX, self.escortY, Assets.joggerHeight + 0.4)
+end
+
 -- Screen position above the runner's head, for the speech bubble.
 function Renderer:RunnerHeadPoint(world)
 	local state = world.runner
@@ -1619,6 +1733,9 @@ function Renderer:Update(world, now)
 	self:UpdateFog(zone, fight)
 	self:DrawShots(now)
 	self:SyncEntities(world, zone, now)
+	if world.Wind then
+		self:AddWind(world, zone.fog.far + 5 - (self.fogPull or 0))
+	end
 	local moved = world.distance - (self.joggerDistance or world.distance)
 	self.joggerDistance = world.distance
 	self:UpdateScenery(world, zone)
@@ -1639,17 +1756,145 @@ function Renderer:Measurements()
 	local function Add(record)
 		local box = record and record.key and self.bounds[record.key]
 		if box and (record.role == "charger" or record.role == "boss") then
-			local scale = self:Fit(record)
-			lines[#lines + 1] = ("%s %s (%s): standing box %.2f to %.2f (middle %.2f), all-animation middle %s, scale %.2f, shifted %.2f yd"):format(
+			local scale, _, _, _, centerY = self:Fit(record)
+			lines[#lines + 1] = ("%s %s (%s): standing box %.2f to %.2f (middle %.2f), all-animation middle %s, running middle %s, scale %.2f, shifted %.2f yd"):format(
 				record.role, record.candidate.name or "?", record.key, box[2], box[5], (box[2] + box[5]) / 2,
-				box[7] and ("%.2f"):format(box[7]) or "none", scale, (box[7] or 0) * scale)
+				box[7] and ("%.2f"):format(box[7]) or "none", box.runY and ("%.2f"):format(box.runY) or "not yet",
+				scale, (centerY or 0) * scale)
+			-- Where it should be and what the game says it was given, to tell
+			-- a model drawn off its lane from one placed off it.
+			local entity = record.entity
+			local actor = record.actor
+			if entity and actor.GetPosition and actor.GetScale then
+				local x, y = actor:GetPosition()
+				local actorScale = actor:GetScale() or 0
+				lines[#lines + 1] = ("  lane %d should be at x %.2f, y %.1f; the game reports scale %.3f and position x %.2f, y %.2f, which is x %.2f, y %.1f in yards"):format(
+					entity.lane, entity.x, entity.y, actorScale, x or 0, y or 0, (x or 0) * actorScale, (y or 0) * actorScale)
+			end
 		end
 	end
 	for _, record in pairs(self.records) do
 		Add(record)
 	end
 	Add(self.bossRecord)
+	-- A boss that isn't showing: say which model it's waiting on, or that none loaded.
+	local boss = self.bossRecord
+	if boss and not boss.ready then
+		lines[#lines + 1] = boss.failed and "boss: none of its models loaded"
+			or ("boss: waiting for model %s (try %d of %d)"):format(tostring(boss.key), boss.index, #boss.list)
+	end
 	return lines
+end
+
+-- Checking every charger ------------------------------------------------------------
+
+-- Yards either side that a charger's middles may differ by before the
+-- report asks for a look in game.
+local CHECK_TOLERANCE = 0.1
+
+-- Starts a check of every zone's charging creatures: each model is loaded,
+-- set running far up the road (in the fog, behind any screen), measured and
+-- dropped, and `report` is called with a line for each, then a summary.
+-- Returns false if a check is already going.
+function Renderer:CheckChargers(report)
+	if self.chargerCheck then
+		return false
+	end
+	local byKey, items = {}, {}
+	for _, zone in ipairs(ns.Zones) do
+		for _, candidate in ipairs(zone.charger or {}) do
+			local key = CandidateKey(candidate)
+			local item = byKey[key]
+			if not item then
+				local record = self:NewRecord({ candidate }, "charger")
+				if record then
+					item = { record = record, zones = {}, name = candidate.name or key }
+					byKey[key] = item
+					items[#items + 1] = item
+				end
+			end
+			if item then
+				item.zones[#item.zones + 1] = zone.name
+			end
+		end
+	end
+	self.chargerCheck = { items = items, report = report }
+	return true
+end
+
+-- One line of the check's report for a measured charger: where the middle
+-- of its body is side to side, in yards from its pivot, standing, over all
+-- its animations and running, and how far it's moved to centre it (on its
+-- running box). Marked for a look when standing and running disagree, or it
+-- couldn't be measured running. The all-animation box is shown but not
+-- judged: it takes in attacks and deaths, so it's often lopsided, and it's
+-- no longer what chargers are centred on.
+local function CheckLine(item, box, scale)
+	local standing = (box[2] + box[5]) / 2 * scale
+	local all = box[7] and box[7] * scale
+	local running = box.runY and box.runY * scale
+	local used = running or all or 0
+	local spread = running and math.abs(standing - running) or math.huge
+	return ("%s %s (%s): middle standing %.2f, all animations %s, running %s yd; moved %.2f yd%s"):format(
+		spread > CHECK_TOLERANCE and "|cffff9b5e[look]|r" or "|cffb6e07f[ok]|r",
+		item.name, table.concat(item.zones, ", "), standing,
+		all and ("%.2f"):format(all) or "?", running and ("%.2f"):format(running) or "?", -used,
+		not running and " - it couldn't be measured running, so check it in game"
+			or spread > CHECK_TOLERANCE and " - standing and running disagree, so check it in game" or ""), spread > CHECK_TOLERANCE
+end
+
+-- Moves the charger check along: called every frame while the window is open.
+function Renderer:UpdateChargerCheck(now)
+	local check = self.chargerCheck
+	if not check then
+		return
+	end
+	local pending = 0
+	for index, item in ipairs(check.items) do
+		if not item.done then
+			local record = item.record
+			self:CheckLoaded(record)
+			if record.failed then
+				item.done = true
+				item.line = ("|cffff6060[missing]|r %s (%s): didn't load in Forever"):format(item.name, table.concat(item.zones, ", "))
+				item.bad = true
+			elseif record.ready then
+				-- In rows up the road, deep in the fog, running toward you.
+				local scale, zOffset = self:Fit(record)
+				local x = ((index - 1) % 5 - 2) * 3
+				local y = 70 + math.floor((index - 1) / 5) * 6
+				self.scene:Place(record.actor, x, y, zOffset, -HALF_PI, scale)
+				record.actor:SetAlpha(1)
+				if not record.animated then
+					record.actor:SetAnimation(Assets.anims.creatureRun[1], nil, 1.4)
+					record.animated = now
+				elseif now - record.animated > RUN_MEASURE_DELAY then
+					local box = self.bounds[record.key]
+					local _, minY, _, _, maxY = Scene.GetActorBounds(record.actor, true)
+					if minY and maxY then
+						-- Kept, so a run that meets this charger uses it straight away.
+						box.runY = (minY + maxY) / 2
+					end
+					item.done = true
+					item.line, item.bad = CheckLine(item, box, scale)
+				end
+			end
+			if not item.done then
+				pending = pending + 1
+			end
+		end
+	end
+	if pending > 0 then
+		return
+	end
+	self.chargerCheck = nil
+	local flagged = 0
+	for _, item in ipairs(check.items) do
+		check.report(item.line)
+		flagged = flagged + (item.bad and 1 or 0)
+		self:FreeRecord(item.record)
+	end
+	check.report(("Checked %d charger models: %d to look at."):format(#check.items, flagged))
 end
 
 -- Reports models that never loaded, once per run.

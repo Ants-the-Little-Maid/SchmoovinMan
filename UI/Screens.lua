@@ -497,6 +497,9 @@ function Screens:ShowGameOver(world, entry, personalRank, guildRank, isBest, cra
 		-- Ironforge's vents are steam.
 		if ns.Rules.IsSteam(ns.Tuning, world.crashRole, world.crashZoneKey or world.zoneKey) then
 			cause = "Scalded by a steam vent"
+		elseif world.crashRole == "pitedge" and zone and zone.pit then
+			-- What's down a pit depends on the zone.
+			cause = "Fell into " .. zone.pit.name
 		end
 	end
 	if world:InFight() then

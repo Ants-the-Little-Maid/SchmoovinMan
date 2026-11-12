@@ -623,12 +623,18 @@ do
 	check("a throw lands at least 0.9 s before reaching you, at every speed", landsEarly)
 end
 
--- Zones that have a boss, from the zone data.
+-- Zones that have a boss, from the zone data, and zones that take a boss's
+-- turn: those, and the Horde capitals, where a leader comes instead.
 local function HasBoss(key)
 	return ns.ZonesByKey[key].boss ~= nil
 end
+local function TakesBoss(key)
+	return HasBoss(key) or Tuning.escorts[key] ~= nil
+end
 
 check("no boss in Thunder Bluff, Orgrimmar or Undercity", not HasBoss("thunderbluff") and not HasBoss("orgrimmar") and not HasBoss("undercity"))
+check("a leader in place of a boss in Thunder Bluff, Orgrimmar and Undercity",
+	Tuning.escorts.thunderbluff and Tuning.escorts.orgrimmar and Tuning.escorts.undercity)
 
 -- Plays an untouchable run without a bot, logging fights and Wind Rider flights.
 local function BossRun(seed, seconds)
@@ -640,6 +646,9 @@ local function BossRun(seed, seconds)
 		for _, event in ipairs(world:DrainEvents()) do
 			if event.type == "bossStart" then
 				fights[#fights + 1] = { zone = world.zoneIndex, key = world.zoneKey, start = world.time, course = world.course, needed = event.needed, spears = 0 }
+			elseif event.type == "escortStart" then
+				-- A leader takes a boss's turn.
+				fights[#fights + 1] = { zone = world.zoneIndex, key = world.zoneKey, start = world.time, course = world.course, escort = true, spears = 0 }
 			elseif event.type == "bossEnd" then
 				local fight = fights[#fights]
 				fight.ends, fight.endCourse, fight.result, fight.points = world.time, world.course, event.result, event.points
@@ -674,28 +683,33 @@ do
 	for seed = 1, math.max(4, math.min(seedCount, 8)) do
 		local world, fights, flights = BossRun(seed, 420)
 		met = met + #fights
-		-- The first boss is in zone 3 to 6, or later only when every zone from
-		-- 6 up to it has no boss (a boss due there is passed on).
+		-- The first boss (or leader) is in zone 3 to 6, or later only when every
+		-- zone from 6 up to it takes none (a boss due there is passed on).
 		local first = fights[1]
 		if not first or first.zone < 3 then
 			scheduleOk = false
 		else
 			for zone = 6, first.zone - 1 do
-				if HasBoss(world:ZoneKey(zone)) then
+				if TakesBoss(world:ZoneKey(zone)) then
 					scheduleOk = false
 					scheduleDetail = ("seed %d: first boss in zone %d"):format(seed, first.zone)
 				end
 			end
 		end
 		for index, fight in ipairs(fights) do
-			bosslessOk = bosslessOk and HasBoss(fight.key)
+			-- A boss only where there is one, a leader only in a capital.
+			if fight.escort then
+				bosslessOk = bosslessOk and not HasBoss(fight.key) and Tuning.escorts[fight.key] ~= nil
+			else
+				bosslessOk = bosslessOk and HasBoss(fight.key)
+			end
 			-- 3 to 6 zones after the last, or later only when the zones from 6
 			-- on up to it have no boss.
 			if index > 1 then
 				local previous = fights[index - 1].zone
 				local ok = fight.zone - previous >= 3
 				for zone = previous + 6, fight.zone - 1 do
-					if HasBoss(world:ZoneKey(zone)) then
+					if TakesBoss(world:ZoneKey(zone)) then
 						ok = false
 					end
 				end
@@ -716,7 +730,7 @@ do
 			end
 			-- No Wind Rider flight still on when a boss turns up.
 			for _, at in ipairs(flights) do
-				if at < fight.start and at + Tuning.durations.windRider > fight.start - 0.5 then
+				if not fight.escort and at < fight.start and at + Tuning.durations.windRider > fight.start - 0.5 then
 					flightOk = false
 				end
 			end
@@ -1095,6 +1109,12 @@ do
 		world:ComboPoints(2)
 	end
 	check("a move deep in a combo pays more", world:ComboPoints(2) == 3 and world.combo == 7)
+	check("a combo's timer is full just after a move", world:ComboLeft() == 1)
+	world.movesAhead = true
+	world.time = world.time + Tuning.combo.timeout / 2
+	check("and half gone halfway to running down", near(world:ComboLeft(), 0.5, 1e-6), world:ComboLeft())
+	world.time = world.time - Tuning.combo.timeout / 2
+	check("a combo starts to run down after five seconds", Tuning.combo.timeout == 5)
 	world.runner.flying = true
 	world.time = world.time + Tuning.combo.timeout + 1
 	world:UpdateCombo(Tuning.combo.timeout + 1)
@@ -1116,6 +1136,7 @@ do
 	world:UpdateCombo(0.01)
 	check("a combo left too long runs down in steps", first == 5 and held == 5 and world.combo == 3 and world.bestCombo == 7,
 		("%d, %d, %d"):format(first, held, world.combo))
+	check("a combo's timer stays empty while it runs down", world.combo > 0 and world:ComboLeft() == 0)
 	for _ = 1, 3 do
 		world.time = world.time + Tuning.combo.decayEvery
 		world:UpdateCombo(0.01)
@@ -1177,6 +1198,15 @@ do
 	check("a lava vent leaves time to step out of its lane and then to cross the road",
 		Tuning.gapMin / 2 >= moveCost and Tuning.gapMin / 2 + vents.ventExtra >= 2 * moveCost)
 	local wind = Tuning.twists.thousandneedles
+	local windy = World.New(3, copy(Tuning), { bosses = false, zones = { "thousandneedles", "mulgore" } })
+	windy.time = 0.5
+	local first, firstLeft = windy:Wind()
+	windy.time = wind.driftEvery + 0.5
+	local second = windy:Wind()
+	windy:ApplyTwist()
+	check("the crosswind blows one way, then turns round, and the runner drifts with it",
+		first == 1 and near(firstLeft, wind.driftEvery - 0.5, 1e-9) and second == -1 and windy.runner.drift == -wind.drift)
+	check("no wind elsewhere", World.New(3, copy(Tuning), { bosses = false }):Wind() == nil)
 	local widest = 0
 	for _, shape in pairs(Rules.SHAPES) do
 		widest = math.max(widest, shape.halfWidth)
@@ -1221,17 +1251,30 @@ do
 	local twists = Tuning.twists
 	local named = true
 	for _, key in ipairs(World.DEFAULT_ZONES) do
-		if key ~= "mulgore" and not (twists[key] and twists[key].name) then
+		if key ~= "mulgore" and not Tuning.escorts[key] and not (twists[key] and twists[key].name) then
 			named = false
 		end
 	end
-	check("every zone but Mulgore has a named twist", named and twists.mulgore == nil)
+	check("every zone but Mulgore and the Horde capitals has a named twist", named and twists.mulgore == nil
+		and not twists.thunderbluff and not twists.orgrimmar and not twists.undercity)
+	local pits = true
+	for _, zone in ipairs(ns.Zones) do
+		local pit = zone.pit
+		pits = pits and pit and type(pit.name) == "string" and #pit.floor == 3 and #pit.glow == 3
+	end
+	check("every zone has its own kind of pit", pits)
+	check("Burning Steppes' pits are fire and Winterspring's ice",
+		ns.ZonesByKey.burningsteppes.pit.name == "a pit of fire" and ns.ZonesByKey.winterspring.pit.name == "an icy crevasse")
+	local arnak = ns.ZonesByKey.thousandneedles.boss.models
+	check("Arnak Grimtotem has backups after his own look", #arnak >= 3)
 
 	-- Runs a world through `seconds` untouchable, in Mulgore then `key` for
 	-- good, and returns it with every entity it ever had, by id.
-	local function Visit(key, seconds, tuning, seed)
-		local world = World.New(seed or 13, tuning or copy(Tuning), { bosses = false, recordTimeline = true, zones = { "mulgore", key } })
-		local met, events = {}, {}
+	-- With `bosses`, bosses (or leaders in their place) come as usual; the
+	-- last leader seen comes back fourth.
+	local function Visit(key, seconds, tuning, seed, bosses)
+		local world = World.New(seed or 13, tuning or copy(Tuning), { bosses = bosses or false, recordTimeline = true, zones = { "mulgore", key } })
+		local met, events, escort = {}, {}, nil
 		while world.time < seconds do
 			world.safeLeft = 1e9
 			world:Step(0.1)
@@ -1241,8 +1284,9 @@ do
 			for _, entity in ipairs(world.entities) do
 				met[entity.id] = entity
 			end
+			escort = world.escort or escort
 		end
-		return world, met, events
+		return world, met, events, escort
 	end
 	local function Count(met, test)
 		local count = 0
@@ -1382,15 +1426,16 @@ do
 	RunFor(wispWorld, 1.0)
 	check("a wisp is worth a point", wispWorld.tokenPoints == Tuning.points.wisp and wispWorld.tokens == 1, wispWorld.tokenPoints)
 
-	-- The Horde capitals: an escort's gifts.
+	-- The Horde capitals: a leader in place of a boss, and their gifts.
 	local moveCost = Tuning.laneChangeTime + Patterns.LIMITS.reaction
 	for _, key in ipairs({ "thunderbluff", "orgrimmar", "undercity" }) do
-		local twist = twists[key]
+		local data = Tuning.escorts[key]
 		local famous = false
 		for _, list in ipairs(ns.Assets.joggers) do
-			famous = famous or list.name == twist.escort
+			famous = famous or list.name == data.name
 		end
-		local town, gifts = Visit(key, 150)
+		local _, plain = Visit(key, 150)
+		local town, gifts = Visit(key, 400, nil, nil, true)
 		local kinds, count, roomy, landed = {}, 0, true, true
 		for _, entity in pairs(gifts) do
 			if entity.gift then
@@ -1405,9 +1450,12 @@ do
 				end
 			end
 		end
-		check(key .. " has an escort who is one of the famous faces", famous, twist.escort)
-		check(key .. "'s escort throws its gifts in turn, with clear road around each",
-			count > 10 and kinds.coin and kinds[twist.gifts[1]] and roomy and landed, count)
+		check(key .. " has a leader who is one of the famous faces", famous, data.name)
+		check(key .. "'s leader throws gifts in turn, with clear road around each",
+			-- (In short zones a leader may only have time for their first gift.)
+			count > 2 and (kinds.coin or Tuning.zoneLength < 20) and kinds[data.gifts[1]] and roomy and landed,
+			("%d pieces, coins %s, %s %s, roomy %s, landed %s"):format(count, tostring(kinds.coin), data.gifts[1], tostring(kinds[data.gifts[1]]), tostring(roomy), tostring(landed)))
+		check(key .. " has no leader or gifts without a boss due", Count(plain, function(entity) return entity.gift end) == 0)
 	end
 	local soon = true
 	for speed = Tuning.baseSpeed, Tuning.maxSpeed do
@@ -1417,6 +1465,42 @@ do
 		end
 	end
 	check("a gift is thrown from no further than the escort and lands 0.4 s or more ahead of you", soon)
+	local _, _, _, escort = Visit("orgrimmar", 400, nil, nil, true)
+	check("a leader keeps count of the gifts thrown and caught",
+		escort and escort.name == "Thrall" and escort.thrown > 0 and escort.caught <= escort.thrown,
+		escort and ("%d of %d"):format(escort.caught, escort.thrown))
+	-- A leader turns up when a boss would, and goes when the zone ends.
+	local leaving = World.New(13, copy(Tuning), { zones = { "mulgore", "orgrimmar", "westfall" } })
+	local arrived, startLeft, zone
+	while leaving.time < 900 and not (zone and leaving.zoneIndex > zone) do
+		leaving.safeLeft = 1e9
+		leaving:Step(0.1)
+		for _, event in ipairs(leaving:DrainEvents()) do
+			if event.type == "escortStart" and not zone then
+				arrived, startLeft, zone = leaving.course - (leaving.zoneIndex - 1) * Tuning.zoneLength, leaving:EscortLeft(), leaving.zoneIndex
+			end
+		end
+	end
+	check("a leader turns up when a boss would, and goes when the zone ends",
+		zone and math.abs(arrived - Tuning.boss.delay) < 0.2 and math.abs(startLeft - (Tuning.zoneLength - Tuning.boss.delay)) < 0.2 and leaving.escort == nil,
+		zone and ("zone %d, at %.1f s, %.1f s left"):format(zone, arrived, startLeft))
+	local unescorted = Visit("westfall", 40)
+	check("no escort where there's none", unescorted.escort == nil)
+	local lines = ns.Assets.quips.escort
+	local schmoove = true
+	for _, key in ipairs({ "thunderbluff", "orgrimmar", "undercity" }) do
+		local own = lines[Tuning.escorts[key].name]
+		schmoove = schmoove and own and #own > 0
+		for _, line in ipairs(own or {}) do
+			schmoove = schmoove and line:lower():find("schmoo") ~= nil
+		end
+	end
+	for _, list in ipairs({ lines.general, lines.caught }) do
+		for _, line in ipairs(list) do
+			schmoove = schmoove and line:lower():find("schmoo") ~= nil
+		end
+	end
+	check("every escort has lines of their own, and every line schmooves", schmoove)
 	local giftWorld = MoveWorld(52)
 	local gift = giftWorld:AddEntity("coin", giftWorld.runner.lane, giftWorld.time + 4, 0.9)
 	gift.thrown, gift.gift, gift.phase, gift.throwMax = true, true, "waiting", Tuning.escort.distance - 2
@@ -1424,6 +1508,24 @@ do
 	local inHand = giftWorld.entities[1] and giftWorld.entities[1].phase
 	RunFor(giftWorld, 3.5)
 	check("a gift waits, flies, lands and can then be taken", inHand == "waiting" and giftWorld.tokens == 1, tostring(inHand))
+	-- A line of coins is one gift: thrown once, caught once.
+	local lineWorld = MoveWorld(53)
+	lineWorld.escort = { name = "Thrall", key = "orgrimmar", zone = lineWorld.zoneIndex, start = lineWorld.time, thrown = 0, caught = 0 }
+	lineWorld.giftZone = nil
+	lineWorld:SpawnGift({ gifts = { "coins" }, giftEvery = 6 }, lineWorld.zoneIndex, lineWorld.time + 4)
+	for _, entity in ipairs(lineWorld.entities) do
+		entity.lane, entity.x = lineWorld.runner.lane, Tuning.lanes[lineWorld.runner.lane]
+	end
+	local gifted = false
+	local stop = lineWorld.time + 5
+	while lineWorld.time < stop do
+		lineWorld:Step(Tuning.step)
+		for _, event in ipairs(lineWorld:DrainEvents()) do
+			gifted = gifted or (event.type == "collect" and event.gift == true)
+		end
+	end
+	check("a line of coins counts as one gift, thrown and caught once", lineWorld.escort.thrown == 1 and lineWorld.escort.caught == 1 and lineWorld.tokens == Tuning.escort.coins and gifted,
+		("%d of %d, %d tokens"):format(lineWorld.escort.caught, lineWorld.escort.thrown, lineWorld.tokens))
 
 	-- A bot gets through the zones whose twists change what's on the road.
 	for _, key in ipairs({ "barrens", "moonglade", "ironforge", "thunderbluff" }) do

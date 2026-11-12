@@ -91,6 +91,8 @@ local DEFAULT_GROUND_TINT = { 0.85, 0.85, 0.85 }
 local VERTEX_UPPER_LEFT, VERTEX_LOWER_LEFT, VERTEX_UPPER_RIGHT, VERTEX_LOWER_RIGHT = 1, 2, 3, 4
 -- A soft four-pointed sparkle from the game's own art, for marks that glow.
 local GLOW_TEXTURE = "Interface\\Cooldown\\star4"
+-- The draw level of each kind of mark (see DrawMarkers), under the fog band.
+local MARKER_LEVEL = { flat = -3, tex = -2, flat1 = -1, flat2 = 0, fade = 1, glow = 1 }
 
 local function Floor(value, step)
 	return math.floor(value / step) * step
@@ -398,40 +400,60 @@ end
 -- halfWidth, halfDepth }) or, with `quad`, four corners anywhere in space
 -- (`q`: a ramp's slope, a pit's walls, a plume of steam). Each has alpha and
 -- r, g, b. `fade` thins it out toward its far edge (its top, stood up);
--- `glow` draws it as a soft sparkle that adds its light to what's behind.
+-- `glow` draws it as a soft sparkle that adds its light to what's behind;
+-- `tex` draws a texture file, the part from u1, v1 (far-left) to u2, v2
+-- (near-right); `level` 1 or 2 lifts a plain mark over those below it.
 -- Red marks where a boss's throws land, hazard markers, pits and ramps.
 function Ground:DrawMarkers(markers)
-	-- Textures are shared out afresh each frame, from a pool for each kind
-	-- (plain, fading, glowing), so none ever has to change from one kind to
-	-- another. Fading and glowing ones (steam, wisps) lie over the plain ones.
+	-- Textures are shared out afresh each frame, from a pool for each kind,
+	-- so none ever has to change from one kind to another. Each pool has its
+	-- own level (MARKER_LEVEL), which settles what lies over what: plain
+	-- marks, then a zone's texture (`tex`, over a pit's bottom and far wall),
+	-- then plain marks with `level` 1 (the bands in a pit) and 2 (ramps),
+	-- then fading and glowing ones (steam, wisps).
 	local pools = self.markerPools
 	if not pools then
-		pools = { flat = {}, fade = {}, glow = {} }
+		pools = {}
+		for kind in pairs(MARKER_LEVEL) do
+			pools[kind] = {}
+		end
 		self.markerPools = pools
 		self.markerUsed = {}
 	end
 	local used = self.markerUsed
-	used.flat, used.fade, used.glow = 0, 0, 0
+	for kind in pairs(pools) do
+		used[kind] = 0
+	end
 	local drawable = self.scene.calibrated
 	for index = 1, markers.count do
 		local marker = markers[index]
-		local kind = marker.glow and "glow" or marker.fade and "fade" or "flat"
+		local kind = marker.glow and "glow" or marker.fade and "fade" or marker.tex and "tex"
+			or marker.level == 2 and "flat2" or marker.level == 1 and "flat1" or "flat"
 		local pool = pools[kind]
 		used[kind] = used[kind] + 1
 		local texture = pool[used[kind]]
 		if not texture then
-			texture = self.layer:CreateTexture(nil, "BACKGROUND", nil, kind == "flat" and -3 or -2)
+			texture = self.layer:CreateTexture(nil, "BACKGROUND", nil, MARKER_LEVEL[kind])
 			texture:SetAllPoints()
 			if kind == "glow" then
 				texture:SetTexture(GLOW_TEXTURE)
 				texture:SetBlendMode("ADD")
-			else
+			elseif kind ~= "tex" then
 				texture:SetColorTexture(1, 1, 1, 1)
 			end
 			pool[used[kind]] = texture
 		end
+		if kind == "tex" then
+			-- A texture file is only set again when it's a different one (a new
+			-- zone's). One that can't be drawn is left out: what's under it shows.
+			if texture.file ~= marker.tex then
+				texture.file = marker.tex
+				texture.bad = texture:SetTexture(marker.tex) == false
+			end
+			texture:SetTexCoord(marker.u1, marker.u2, marker.v1, marker.v2)
+		end
 		local shown
-		if not drawable then
+		if not drawable or texture.bad then
 			texture:Hide()
 		elseif marker.quad then
 			shown = self:Quad(texture, marker.q)

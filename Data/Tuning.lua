@@ -117,7 +117,7 @@ ns.Tuning = {
 	-- times. Thick Hide breaking ends it. Left `timeout` seconds without a
 	-- move it starts to run down, losing `decay` every `decayEvery` seconds;
 	-- only time with something ahead to jump, duck, ride or knock counts.
-	combo = { every = 5, step = 0.5, max = 3, timeout = 6, decay = 2, decayEvery = 2 },
+	combo = { every = 5, step = 0.5, max = 3, timeout = 5, decay = 2, decayEvery = 2 },
 
 	-- Pits: a hole right across the road, `tile` yards to a tile and 2 or 3
 	-- tiles long (set by the pattern), with a ramp at its edge in one or two
@@ -159,12 +159,6 @@ ns.Tuning = {
 	--               check's 0.75 s between jumps
 	--   allianceChance  the chance of an Alliance jogger after a chunk there
 	--   shield      you're given Thick Hide on entering the zone
-	--   escort, gifts, giftEvery, giftExtra  a famous face (a name in
-	--               Assets.joggers) runs ahead beside the road and throws a
-	--               gift into a lane every giftEvery seconds or so, in the gap
-	--               after a chunk, with giftExtra seconds of clear road after
-	--               it. The gifts take turns: a power-up's name, or "coins"
-	--               for a short line of them (Tuning.escort)
 	twists = {
 		winterspring = { name = "Icy road: lane changes slide", laneChange = 0.2, spacing = 1.25 },
 		burningsteppes = { name = "Lava vents: keep off the glow", ventChance = 0.45, ventExtra = 0.8 },
@@ -178,17 +172,27 @@ ns.Tuning = {
 		stormwind = { name = "Crowded streets: more joggers to knock", allianceChance = 0.9 },
 		darnassus = { name = "Moonwell blessing: Thick Hide", shield = true },
 		ironforge = { name = "Steam vents: keep out of the steam", ventChance = 0.45, ventExtra = 0.8, steam = true },
-		thunderbluff = { name = "Cairne runs ahead: catch the gifts", escort = "Cairne Bloodhoof", gifts = { "stampede", "coins" }, giftEvery = 6, giftExtra = 1.0 },
-		orgrimmar = { name = "Thrall runs ahead: catch the gifts", escort = "Thrall", gifts = { "goldRush", "coins" }, giftEvery = 6, giftExtra = 1.0 },
-		undercity = { name = "Sylvanas runs ahead: catch the gifts", escort = "Sylvanas Windrunner", gifts = { "shield", "coins" }, giftEvery = 6, giftExtra = 1.0 },
+	},
+	-- Escorts: in the Horde capitals, which have no boss, a boss due there is
+	-- a leader instead (by zone key). They turn up as a boss would, run ahead
+	-- beside the road for the rest of the zone and throw a gift into a lane
+	-- every giftEvery seconds or so, in the gap after a chunk, with giftExtra
+	-- seconds of clear road after it. The gifts take turns: a power-up's
+	-- name, or "coins" for a short line of them (Tuning.escort). `name` is
+	-- one of the famous faces in Assets.joggers, whose model they use.
+	escorts = {
+		thunderbluff = { name = "Cairne Bloodhoof", gifts = { "stampede", "coins" }, giftEvery = 6, giftExtra = 1.0 },
+		orgrimmar = { name = "Thrall", gifts = { "goldRush", "coins" }, giftEvery = 6, giftExtra = 1.0 },
+		undercity = { name = "Sylvanas Windrunner", gifts = { "shield", "coins" }, giftEvery = 6, giftExtra = 1.0 },
 	},
 	-- Wisps: one `lead` seconds before each row on the way, unless something
 	-- solid stands in that lane within `clear` seconds of the spot.
 	wisps = { lead = 0.3, clear = 0.35 },
 	-- Escorts: where one runs, in yards ahead (near enough to see without the
 	-- boss camera), and a gift of coins: how many, and the seconds between them.
-	-- A gift is thrown from no further than the escort.
-	escort = { distance = 24, coins = 4, coinSpacing = 0.18 },
+	-- A gift is thrown from no further than the escort, and the first lands no
+	-- sooner than `lead` seconds after they turn up.
+	escort = { distance = 24, coins = 4, coinSpacing = 0.18, lead = 2.5 },
 
 	-- Alliance joggers on the track: the chance one jogs in the gap after a
 	-- chunk, from this zone on, at this share of your speed.

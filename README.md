@@ -12,7 +12,7 @@ Open it with `/schmoove` or the kodo button on the minimap. Right-click the butt
 - **Three lanes, five moves**: change lane, jump, duck, and power-ups that let you fly or smash through.
 - **Hazards that fit each zone**: logs, totems, ruin walls, bars to duck under, and charging kodos, devilsaurs and yetis.
 - **Pits** right across the road, with fire at the bottom: get to a ramp and it throws you over.
-- **Zone twists**: every zone but Mulgore has a rule of its own. An icy road in Winterspring, lava vents in Burning Steppes, floaty jumps in Moonglade, wisps that show the way in Ashenvale, and in the Horde capitals Cairne, Thrall or Sylvanas runs ahead and throws you gifts.
+- **Zone twists**: most zones have a rule of their own. An icy road in Winterspring, lava vents in Burning Steppes, floaty jumps in Moonglade, wisps that show the way in Ashenvale and more.
 - **Combos**: jumps, ducks, ramps and knocks in a row pay more, up to three times.
 - **Five power-ups**:
   - Wind Rider: fly over everything.
@@ -21,7 +21,7 @@ Open it with `/schmoove` or the kodo button on the minimap. Right-click the butt
   - Gold Rush: double token points.
   - Stampede: smash through hazards.
 - **Joggers** of the Horde jog along the roadside. Overtake them and your Tauren has something to say. Fellow Tauren have something to say back, and so do famous faces such as Thrall, Cairne, Vol'jin and Sylvanas.
-- **Bosses** block the road every few zones: Edwin VanCleef in Westfall, King Mosh in Un'Goro, King Magni in Ironforge and more, one for each zone outside the Horde capitals. A boss throws hazards into your lanes, with a red mark where each will land. Grab the spears that turn up and they're thrown at the boss: enough hits drive it off for a big bonus, or survive 25 seconds until it gives up. The zone clock stops while a boss is out.
+- **Bosses** block the road every few zones: Edwin VanCleef in Westfall, King Mosh in Un'Goro, King Magni in Ironforge and more, one for each zone outside the Horde capitals. When a boss is due in Thunder Bluff, Orgrimmar or Undercity, Cairne, Thrall or Sylvanas comes instead, running ahead and throwing you gifts. A boss throws hazards into your lanes, with a red mark where each will land. Grab the spears that turn up and they're thrown at the boss: enough hits drive it off for a big bonus, or survive 25 seconds until it gives up. The zone clock stops while a boss is out.
 - **Alliance joggers** get in your lane. Run into them to knock them flying, with a one-liner from your Tauren. They never end your run, and you can jump over them if you'd rather.
 - **Scoring**: points for tokens, for time survived, and for style: +2 for every obstacle you jump over, +3 for every bar you duck under and +5 for every Alliance jogger you knock over. Bosses pay +50 a spear, +500 for driving one off and +150 for outlasting one.
 - **Scores**: a personal top 10 shared across your characters, plus a guild board with guildmates who have the addon.

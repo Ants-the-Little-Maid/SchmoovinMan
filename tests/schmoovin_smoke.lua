@@ -516,33 +516,86 @@ assert(C.state == "running", "right-click fallback didn't start a run")
 -- larger max box, and stays inside the sane character scale range.
 local runnerScale = C.renderer:Fit(C.renderer.runner)
 assert(runnerScale and math.abs(runnerScale - ns.Assets.runnerHeight / 2) < 1e-6, "runner not sized from its active box: " .. tostring(runnerScale))
--- Riding the wind rider leaves the runner's actor scaled by the mount, so
--- landing gives the runner a fresh actor and keeps the old one out of the pool.
+-- On the wind rider the runner sits on its back, placed there (never
+-- attached), facing up the road like the wyvern, and keeps its own actor.
 do
 	local R = C.renderer
 	local before = R.runner.actor
+	local attached = 0
+	rawset(R.runner.actor, "AttachToMount", function() attached = attached + 1 end)
+	local placed = {}
+	local realPlace = R.scene.Place
+	R.scene.Place = function(scene, actor, x, y, z, yaw, ...)
+		placed[actor] = { x = x, y = y, z = z, yaw = yaw }
+		return realPlace(scene, actor, x, y, z, yaw, ...)
+	end
 	C.world.safeLeft = 1e9
 	C.world:ApplyPowerup("windRider")
 	Frames(1)
-	assert(R.mount and R.mountAttached, "wind rider didn't attach the runner")
-	assert(R.runner.actor == before, "runner actor changed before landing")
-	local mountActor = R.mount.actor
+	local mount = R.mount
+	assert(mount and mount.ready, "no wind rider")
+	local rider, wyvern = placed[R.runner.actor], placed[mount.actor]
+	assert(rider and wyvern and rider.yaw == wyvern.yaw and math.abs(rider.yaw - math.pi / 2) < 1e-9, "runner and wyvern don't both face up the road")
+	assert(rider.z > wyvern.z, "runner isn't on the wyvern's back")
+	assert(attached == 0, "the runner was attached to the mount")
 	-- Let the flight run out and the runner come down.
 	Frames(ns.Tuning.durations.windRider + 2)
 	assert(not C.world.runner.flying and not R.mount, "wind rider still there after landing")
-	assert(R.runner.actor ~= before, "runner kept the actor it rode with")
-	assert(R.runner.actor ~= mountActor, "runner was given the actor that was the mount")
-	for _, actor in ipairs(R.scene.freeActors) do
-		assert(actor ~= before, "the ridden runner actor went back to the pool")
-	end
-	-- Quitting mid-flight does the same.
-	local again = R.runner.actor
+	assert(R.runner.actor == before, "runner lost its actor on landing")
+	R.scene.Place = realPlace
+	rawset(R.runner.actor, "AttachToMount", nil)
 	C.world:ApplyPowerup("windRider")
 	Frames(1)
-	assert(R.mountAttached, "wind rider didn't attach the second time")
 	R:Reset()
-	assert(not R.mount and R.runner.actor ~= again, "reset mid-flight kept the ridden runner actor")
+	assert(not R.mount, "reset mid-flight kept the wind rider")
 	C.world.safeLeft = 0
+end
+-- A charger is centred on its box while running, once it has run a moment,
+-- not on its all-animation box.
+do
+	local R = C.renderer
+	local world = C.world
+	world.entities = {}
+	world.cursor = 1e9
+	local charger = world:AddEntity("charger", 2, world.time + 3, 0)
+	Frames(0.05)
+	local record = R.records[charger.id]
+	assert(record and record.ready, "charger not drawn")
+	local box = R.bounds[record.key]
+	box.runY = nil
+	box[7] = 0.4
+	rawset(record.actor, "GetActiveBoundingBox", function() return -1, -0.9, 0, 1, 1.1, 2 end)
+	Frames(0.5)
+	assert(box.runY and math.abs(box.runY - 0.1) < 1e-9, "running box not measured: " .. tostring(box.runY))
+	local _, _, _, _, centerY = R:Fit(record)
+	assert(centerY == box.runY, "charger not centred on its running box")
+	world.entities = {}
+	Frames(0.05)
+end
+-- /schmoove measure all: every charger model is loaded, run and reported,
+-- and the check finishes.
+do
+	local printed = {}
+	local realPrint = ns.Print
+	ns.Print = function(message)
+		printed[#printed + 1] = message
+	end
+	SlashCmdList.SCHMOOVINMAN("measure all")
+	Frames(2)
+	ns.Print = realPrint
+	local models = {}
+	for _, zone in ipairs(ns.Zones) do
+		for _, candidate in ipairs(zone.charger or {}) do
+			models[ns.Models.Key(candidate)] = true
+		end
+	end
+	local count = 0
+	for _ in pairs(models) do
+		count = count + 1
+	end
+	assert(#printed == count + 2 and printed[#printed]:find("Checked " .. count .. " charger models"),
+		"charger check report: " .. tostring(printed[#printed]) .. " (" .. #printed .. " lines)")
+	assert(C.renderer.chargerCheck == nil, "charger check never finished")
 end
 -- A model whose geometry hasn't streamed in yet is not measured.
 local waiting = C.renderer:NewRecord({ { fileID = 123456789 } }, "jogger")
@@ -986,6 +1039,34 @@ do
 	Frames(0.05)
 	assert(C.renderer.markers.count == 0, "hazard marks still drawn after turning them off")
 end
+-- A crosswind: streaks over the road and the wind gauge, only where it blows.
+do
+	local C = ns.Controller
+	local world = C.world
+	world.entities = {}
+	world.cursor = 1e9
+	local hud = C.hud
+	rawset(hud.windText, "SetText", function(self, value) rawset(self, "value", value) end)
+	assert(not hud.wind.shown, "wind gauge shown without wind")
+	world.zoneOrder[world.zoneIndex] = "thousandneedles"
+	world.zoneKey = "thousandneedles"
+	local every = ns.Tuning.twists.thousandneedles.driftEvery
+	-- Halfway through a spell of wind, well clear of a turn.
+	world.time = (math.floor(world.time / every) + 0.5) * every
+	world.safeLeft = 1e9
+	Frames(0.05)
+	local streaks = 0
+	for index = 1, C.renderer.markers.count do
+		streaks = streaks + (C.renderer.markers[index].quad and 1 or 0)
+	end
+	local direction = world:Wind()
+	assert(streaks > 10, "no wind streaks: " .. streaks)
+	assert(hud.wind.shown and hud.windText.value == (direction > 0 and "Wind  >>>" or "<<<  Wind"), "wind gauge: " .. tostring(hud.windText.value))
+	world.zoneOrder[world.zoneIndex] = "mulgore"
+	world.zoneKey = "mulgore"
+	Frames(0.05)
+	assert(not hud.wind.shown, "wind gauge stayed on after the wind")
+end
 -- Things drawn by hand: a pit and its ramp, a steam vent, a wisp, and an
 -- escort with a gift in the air.
 do
@@ -1008,7 +1089,33 @@ do
 	end
 	-- A ramp alone is two sides, a top, a lip and six arrow arms.
 	assert(quads >= 12, "pit and ramp not drawn in perspective: " .. quads)
+	-- Down the pit, its zone's ground texture, and the ramp over it all.
+	local textured = 0
+	for index = 1, r.markers.count do
+		local marker = r.markers[index]
+		if marker.tex then
+			textured = textured + 1
+			assert(marker.tex == ns.ZonesByKey[pit.zoneKey].ground, "pit texture isn't its zone's ground")
+		end
+	end
+	assert(textured >= 2, "no zone texture down the pit: " .. textured)
+	assert(#r.ground.markerPools.flat2 >= 12, "ramp not drawn over the pit: " .. #r.ground.markerPools.flat2)
 	assert(next(r.records) == nil, "a pit or ramp was given a model")
+
+	-- The combo's timer: shown from a combo of two, full just after a move,
+	-- emptying until it runs down.
+	local hud = C.hud
+	world.combo, world.comboAt = 3, world.time
+	Frames(0.05)
+	assert(hud.comboBar.track.shown, "no combo timer with a combo going")
+	world.comboAt = world.time - ns.Tuning.combo.timeout / 2
+	world.movesAhead = true
+	Frames(0.02)
+	local filled = hud.comboBar.fill.shown
+	world.combo = 0
+	Frames(0.05)
+	assert(not hud.comboBar.track.shown, "combo timer still shown with no combo")
+	assert(filled, "combo timer empty halfway")
 
 	world.entities = {}
 	local vent = world:AddEntity("vent", 2, world.time + 2, 0)
@@ -1026,6 +1133,10 @@ do
 	world.entities = {}
 	world.zoneOrder[world.zoneIndex] = "orgrimmar"
 	world.zoneKey = "orgrimmar"
+	for _, text in ipairs({ C.hud.escortName, C.hud.escortCount, C.hud.escortLeft, C.escortBubble.text }) do
+		rawset(text, "SetText", function(self, value) rawset(self, "value", value) end)
+	end
+	world.escort = { name = "Thrall", key = "orgrimmar", zone = world.zoneIndex, start = world.time, thrown = 0, caught = 0 }
 	local gift = world:AddEntity("goldRush", 2, world.time + 1.2, 0.9)
 	gift.thrown, gift.gift, gift.phase, gift.throwMax = true, true, "waiting", ns.Tuning.escort.distance - 2
 	local flew = false
@@ -1036,10 +1147,26 @@ do
 	end
 	assert(r.escort and r.escort.name == "Thrall" and r.escortY, "no escort in Orgrimmar")
 	assert(flew, "a gift in the air has no green landing mark")
+	-- The escort's bar, and a shout over their head.
+	world.escort.thrown, world.escort.caught = 2, 1
+	local shout
+	for _ = 1, 200 do
+		world.safeLeft = 1e9
+		Frames(1 / 60)
+		if C.escortBubble:IsShown() then
+			shout = C.escortBubble.text.value
+		end
+	end
+	assert(C.hud.escort.shown, "no escort bar")
+	assert(C.hud.escortName.value == "Thrall" and C.hud.escortCount.value == "1 of 2 gifts caught", "escort bar: " .. tostring(C.hud.escortCount.value))
+	assert(C.hud.escortLeft.value:find("Leaves in"), "escort bar has no time left")
+	assert(shout and shout:lower():find("schmoo"), "the escort didn't shout: " .. tostring(shout))
+	world.escort = nil
 	world.zoneOrder[world.zoneIndex] = "mulgore"
 	world.zoneKey = "mulgore"
 	Frames(2)
 	assert(r.escort == nil, "the escort stayed on after its zone")
+	assert(not C.hud.escort.shown, "the escort bar stayed on after its zone")
 end
 print("templates used: " .. table.concat((function() local t = {} for k in pairs(templatesUsed) do t[#t + 1] = k end table.sort(t) return t end)(), ", "))
 print(("smoke ok: %d scores, guild board %d, %d messages sent, best %s"):format(#ns.db.scores, #ns.GuildBoard.List(), #sent, tostring(ns.db.scores[1].score)))

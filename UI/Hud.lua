@@ -21,6 +21,9 @@ local POWERUPS_TOP = -12 - LEFT_HEIGHT - 8
 -- Boss bar: one pip per spear needed, up to this many.
 local MAX_PIPS = 16
 local BOSS_RED = "c0392b"
+-- The escort bar's edge and name colour.
+local ESCORT_GREEN = "4f9a3a"
+local ESCORT_NAME = "b6e07f"
 local BOSS_NAME = "ff9b8a"
 local PIP_ON = "ff9b5e"
 local PIP_OFF = "3a1410"
@@ -51,6 +54,12 @@ function Hud.Create(layer)
 	-- next one pays. Shown from two.
 	self.combo = UI.Text(panel, 12, C.orange)
 	self.combo:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -53)
+	-- Under it, the time left before the combo starts to run down.
+	self.comboBar = UI.Bar(panel, 3, C.orange, "2a1d10")
+	self.comboBar.track:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -67)
+	self.comboBar.track:SetWidth(84)
+	self.comboBar.track:Hide()
+	self.comboBar.fill:Hide()
 	local divider = panel:CreateTexture(nil, "ARTWORK")
 	divider:SetColorTexture(UI.Hex(C.divider))
 	divider:SetHeight(1)
@@ -98,6 +107,27 @@ function Hud.Create(layer)
 	self.boss = boss
 	self.pipCount = 0
 
+	-- Escort bar, in the same slot, in green: who's running ahead and what
+	-- they throw, gifts caught of those thrown, and the time until they leave
+	-- beside it and along the bottom.
+	local escort = UI.Panel(layer, "06140a", 0.5, ESCORT_GREEN)
+	escort:SetPoint("TOP", 0, -8)
+	escort:SetSize(330, 42)
+	self.escortName = UI.Text(escort, 14, ESCORT_NAME)
+	self.escortName:SetPoint("TOPLEFT", 12, -6)
+	self.escortCount = UI.Text(escort, 11, C.text)
+	self.escortCount:SetPoint("TOPRIGHT", -12, -8)
+	self.escortGifts = UI.Text(escort, 11, C.subText)
+	self.escortGifts:SetPoint("TOPLEFT", 12, -24)
+	self.escortLeft = UI.Text(escort, 11, C.subText)
+	self.escortLeft:SetPoint("TOPRIGHT", -12, -24)
+	self.escortTimer = UI.Bar(escort, 2, ESCORT_NAME, "10301a")
+	self.escortTimer.track:SetPoint("BOTTOMLEFT", 6, 4)
+	self.escortTimer.track:SetPoint("BOTTOMRIGHT", -6, 4)
+	self.escortTimer.fill:SetAlpha(0.7)
+	escort:Hide()
+	self.escort = escort
+
 	-- Tokens.
 	local tokens = UI.Panel(layer)
 	tokens:SetPoint("TOPRIGHT", -14, -12)
@@ -111,6 +141,19 @@ function Hud.Create(layer)
 	local tokensLabel = UI.Text(tokens, 11, C.subText)
 	tokensLabel:SetPoint("TOPLEFT", self.tokens, "BOTTOMLEFT", 0, -2)
 	tokensLabel:SetText("tokens")
+
+	-- A crosswind (Thousand Needles' twist), under the tokens: which way it
+	-- blows and, along the bottom, the time until it turns round.
+	local wind = UI.Panel(layer)
+	wind:SetPoint("TOPRIGHT", tokens, "BOTTOMRIGHT", 0, -8)
+	wind:SetSize(120, 40)
+	self.windText = UI.Text(wind, 13, C.white)
+	self.windText:SetPoint("TOP", 0, -8)
+	self.windBar = UI.Bar(wind, 3, C.label, "2a1d10")
+	self.windBar.track:SetPoint("BOTTOMLEFT", 10, 7)
+	self.windBar.track:SetPoint("BOTTOMRIGHT", -10, 7)
+	wind:Hide()
+	self.wind = wind
 
 	-- Power-up bars, stacked under the left panel.
 	self.powerups = {}
@@ -288,6 +331,37 @@ function Hud:UpdateBoss(world, alpha)
 	self.bossLeft:SetText(Clock(left))
 end
 
+-- The escort bar, while a famous face runs ahead throwing gifts; `alpha`
+-- lets it give way to a banner in the same slot, as the boss bar does.
+function Hud:UpdateEscort(world, alpha)
+	local escort = world.escort
+	if not escort or world.over or world:InFight() then
+		self.escort:Hide()
+		return
+	end
+	self.escort:Show()
+	self.escort:SetAlpha(alpha)
+	if self:Changed("escortName", escort.name) then
+		self.escortName:SetText(escort.name)
+		local data = world:EscortData(escort.key)
+		local names = {}
+		for _, gift in ipairs(data and data.gifts or {}) do
+			-- A power-up by its bar's name; "coins" as it is.
+			local style = UI.POWERUP_STYLE[gift]
+			names[#names + 1] = style and style.name or gift
+		end
+		self.escortGifts:SetText(#names > 0 and ("Throws " .. table.concat(names, " and ")) or "")
+	end
+	if self:Changed("escortCount", escort.caught * 1000 + escort.thrown) then
+		self.escortCount:SetText(escort.thrown > 0 and string.format("%d of %d gifts caught", escort.caught, escort.thrown) or "Gifts coming")
+	end
+	local left = world:EscortLeft()
+	if self:Changed("escortLeft", math.ceil(left)) then
+		self.escortLeft:SetText("Leaves in " .. Clock(left))
+	end
+	self.escortTimer:SetValue(left / world.tuning.zoneLength)
+end
+
 function Hud:SetShown(shown)
 	self.layer:SetShown(shown)
 	-- Everything is written again the next time it's drawn.
@@ -348,6 +422,21 @@ function Hud:Update(world, best, zoneName, now)
 	if self:Changed("tokens", world.tokens) then
 		self.tokens:SetText(UI.FormatNumber(world.tokens))
 	end
+	-- The wind: shown while there is one, saying "Turning!" in its last second.
+	local direction, turnsIn = world:Wind()
+	local windShown = direction ~= nil and not world.over
+	if self:Changed("windShown", windShown) then
+		self.wind:SetShown(windShown)
+	end
+	if windShown then
+		local turning = turnsIn <= 1
+		local label = turning and "Turning!" or (direction > 0 and "Wind  >>>" or "<<<  Wind")
+		if self:Changed("windText", label) then
+			self.windText:SetText(label)
+			self.windText:SetTextColor(UI.Hex(turning and UI.COLORS.orange or UI.COLORS.white))
+		end
+		self.windBar:SetValue(turnsIn / world:Twist().driftEvery)
+	end
 	local combo = world.combo or 0
 	if self:Changed("combo", combo) then
 		if combo >= 2 then
@@ -356,6 +445,16 @@ function Hud:Update(world, best, zoneName, now)
 		else
 			self.combo:SetText("")
 		end
+		self.comboBar.track:SetShown(combo >= 2)
+	end
+	if combo >= 2 then
+		-- In steps of a hundredth, so it's only redrawn when it has moved.
+		local left = math.floor(world:ComboLeft() * 100 + 0.5)
+		if self:Changed("comboLeft", left) then
+			self.comboBar:SetValue(left / 100)
+		end
+	elseif self:Changed("comboLeft", -1) then
+		self.comboBar:SetValue(0)
 	end
 
 	-- Power-up bars, top to bottom in a fixed order. They're laid out again
@@ -409,4 +508,5 @@ function Hud:Update(world, best, zoneName, now)
 	end
 	self.banner:SetAlpha(alpha)
 	self:UpdateBoss(world, 1 - alpha)
+	self:UpdateEscort(world, 1 - alpha)
 end

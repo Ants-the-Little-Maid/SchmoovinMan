@@ -157,7 +157,9 @@ ns.Zones = {
 			wall = { { fileID = 202694, name = "Hay bale stop" }, { fileID = 202697, name = "Hay bale wall" } }, -- haybail back-stop, straightaway03
 		},
 		charger = { { displayID = 1308, name = "Kodo" }, { displayID = 322, name = "Raptor" } }, -- kodo, raptor
-		boss = { name = "Arnak Grimtotem", height = 4.1, models = { { displayID = 10243 }, { displayID = 1308 } } }, -- npc 10896
+		-- Display 10243 never showed in Forever (seen 2026-11-12), so he wears
+		-- Magatha Grimtotem's look, then a plain Tauren's, then the zone's kodo.
+		boss = { name = "Arnak Grimtotem", height = 4.1, models = { { displayID = 4510 }, { displayID = 2141 }, { displayID = 1308 } } }, -- npc 10896
 	},
 	{
 		key = "ashenvale",
@@ -289,7 +291,7 @@ ns.Zones = {
 			block = { { fileID = 202846, name = "Rock" }, { fileID = 202842, name = "Furbolg totem" } }, -- rock02, furbolg totem 2
 			wall = { { fileID = 202847, name = "Rock wall" }, { fileID = 202874, name = "Fallen trunk" } }, -- rock03, fallen tree 2
 		},
-		charger = { { displayID = 10579, name = "Ice Thistle yeti" }, { displayID = 21601, name = "Yeti" }, { displayID = 10914, name = "Woolly kodo" }, { displayID = 161, name = "Wolf" } }, -- Ice Thistle Yeti, older yeti with other skins, wooly kodo, wolf
+		charger = { { displayID = 10579, name = "Ice Thistle yeti" }, { displayID = 10914, name = "Woolly kodo" }, { displayID = 161, name = "Wolf" } }, -- Ice Thistle Yeti, wooly kodo, wolf (yeti display 21601 isn't in Forever: /schmoove measure all, 2026-11-12)
 		boss = { name = "Rak'shiri", height = 3.4, models = { { displayID = 10054 }, { displayID = 10579 } } }, -- npc 10200
 	},	{
 		key = "westfall",
@@ -506,7 +508,28 @@ ns.Zones = {
 	},
 }
 
+-- What's down a pit in each zone (zone.pit, used by Renderer:AddPit): `floor`
+-- is the colour of the bottom and `glow` of the bands that move across it;
+-- `name` goes in the game-over text. The zone's own ground texture is laid
+-- over the bottom and the far wall.
+local PITS = {
+	fire = { name = "a pit of fire", floor = C("c8400a"), glow = C("ffb030") },
+	water = { name = "deep water", floor = C("1c5a9a"), glow = C("bfe6ff") },
+	ice = { name = "an icy crevasse", floor = C("8fc4e8"), glow = C("ffffff") },
+	tar = { name = "a tar pit", floor = C("14100c"), glow = C("7a5a34") },
+	slime = { name = "a slime pit", floor = C("3f9a1c"), glow = C("d0ff60") },
+	amber = { name = "a silithid burrow", floor = C("a8620e"), glow = C("ffd870") },
+	chasm = { name = "a chasm", floor = C("1c140c"), glow = C("9a8468") },
+}
+local PIT_IN = {
+	mulgore = "chasm", barrens = "chasm", thousandneedles = "chasm", thunderbluff = "chasm",
+	ashenvale = "water", westfall = "water", moonglade = "water", stormwind = "water", darnassus = "water",
+	burningsteppes = "fire", ironforge = "fire", orgrimmar = "fire",
+	silithus = "amber", ungoro = "tar", winterspring = "ice", undercity = "slime",
+}
+
 ns.ZonesByKey = {}
 for _, zone in ipairs(ns.Zones) do
 	ns.ZonesByKey[zone.key] = zone
+	zone.pit = PITS[PIT_IN[zone.key] or "chasm"]
 end

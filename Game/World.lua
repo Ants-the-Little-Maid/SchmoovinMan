@@ -47,14 +47,19 @@ Fields:
             spear: a boss-only pickup that's thrown at the boss when you grab it
       gift: a coin or power-up an escort throws (thrown too, from throwMax
             yards at most); it can be taken once it has landed
+  escort = nil, or while a leader runs ahead in place of a boss (a Horde
+      capital, Tuning.escorts): { name, key, zone, start, thrown, caught }, the
+      gifts thrown and caught so far (one each for a line of coins). It lasts
+      until the zone ends
   over (bool), crashRole, crashZoneKey
 
 Events ({ type = ..., ... }):
-  collect {role, points}, powerup {role}, expire {role}, zone {index, key, fromSpeed},
+  collect {role, points, gift}, powerup {role, gift}, expire {role}, zone {index, key, fromSpeed},
   cleared {role, move, points} (jumped a low obstacle or ducked a high bar in your path),
   knock {points} (ran into an Alliance jogger), dodge {points} (a Tauren got past),
   bossStart {name, needed, limit}, spear {hits, needed, points},
   bossEnd {result = "driven" | "survived", name, points},
+  escortStart {name, key}, escortEnd {name},
   comboEnd {count}, crash {role}, shieldBreak {role}, smash {role}, jump, duck, land, lane
 ]]
 
@@ -163,13 +168,26 @@ end
 function World:ComboPoints(points)
 	self.combo = self.combo + 1
 	self.comboAt = self.time
+	self.comboFading = nil
 	if self.combo > self.bestCombo then
 		self.bestCombo = self.combo
 	end
 	return math.floor(points * Rules.ComboMultiplier(self.tuning, self.combo) + 0.5)
 end
 
+-- How much of the time before a combo starts to run down is left, from 1 (a
+-- move just made) to 0, and 0 while it's running down. It holds still while
+-- the combo's clock does.
+function World:ComboLeft()
+	local combo = self.tuning.combo
+	if self.combo == 0 or not combo or self.comboFading then
+		return 0
+	end
+	return math.max(0, math.min(1, 1 - (self.time - self.comboAt) / combo.timeout))
+end
+
 function World:BreakCombo()
+	self.comboFading = nil
 	if self.combo > 0 then
 		self:Emit({ type = "comboEnd", count = self.combo })
 		self.combo = 0
@@ -190,11 +208,13 @@ function World:UpdateCombo(h)
 		self.comboAt = self.comboAt + h
 	elseif self.time - self.comboAt > combo.timeout then
 		-- Left too long, it runs down a little at a time rather than ending.
+		self.comboFading = true
 		self.comboAt = self.comboAt + combo.decayEvery
 		local left = self.combo - combo.decay
 		if left > 0 then
 			self.combo = left
 		else
+			self.comboFading = nil
 			self:BreakCombo()
 		end
 	end
@@ -209,13 +229,21 @@ function World:ApplyTwist()
 	runner.laneChangeTime = twist and twist.laneChange or nil
 	runner.gravity = twist and twist.gravity or nil
 	runner.jumpSpeed = twist and twist.jumpSpeed or nil
-	local drift = 0
-	if twist and twist.drift then
-		-- By run time, not the zone clock, so it still turns in a boss fight.
-		local turn = math.floor(self.time / twist.driftEvery)
-		drift = (turn % 2 == 0) and twist.drift or -twist.drift
+	local direction = self:Wind()
+	runner.drift = direction and direction * twist.drift or 0
+end
+
+-- A crosswind (the zone's twist): which way it blows, 1 for right (+x) or
+-- -1 for left, and the seconds until it turns round. Nil where there's none.
+-- By run time, not the zone clock, so it still turns in a boss fight.
+function World:Wind()
+	local twist = self:Twist()
+	if not (twist and twist.drift) then
+		return nil
 	end
-	runner.drift = drift
+	local every = twist.driftEvery
+	local turn = math.floor(self.time / every)
+	return turn % 2 == 0 and 1 or -1, (turn + 1) * every - self.time
 end
 
 -- Speed shown at a zone-clock time: yours, or in an orc run the Tauren's.
@@ -309,24 +337,40 @@ local function BossData(key)
 	return zone and zone.boss
 end
 
--- The first zone from `index` on that has a boss.
+-- The leader who stands in for a boss in a zone (Tuning.escorts), or nil.
+function World:EscortData(key)
+	local escorts = self.tuning.escorts
+	return self.mode ~= "orc" and escorts and escorts[key] or nil
+end
+
+-- The first zone from `index` on that has a boss, or a leader in its place.
 function World:FindBossZone(index)
 	if #self.zonePool < 2 then
 		return nil
 	end
 	for zone = index, index + 2 * #self.zonePool do
-		if BossData(self:ZoneKey(zone)) then
+		local key = self:ZoneKey(zone)
+		if BossData(key) or self:EscortData(key) then
 			return zone
 		end
 	end
 	return nil
 end
 
--- Run time the next boss turns up. Only valid between fights, while the zone
--- clock runs in step with the run.
+-- Run time the next boss (or leader) turns up. Only valid between fights,
+-- while the zone clock runs in step with the run.
 function World:BossStart()
 	local tuning = self.tuning
 	return (self.bossZone - 1) * tuning.zoneLength + tuning.boss.delay + self.paused
+end
+
+-- Run time the next boss fight starts, or nil if none is due (nor when a
+-- leader is due instead: they need no clear road and don't stop the clock).
+function World:FightDue()
+	if self.bossZone and BossData(self:ZoneKey(self.bossZone)) then
+		return self:BossStart()
+	end
+	return nil
 end
 
 function World:InFight()
@@ -339,11 +383,10 @@ end
 function World:FightAt(at)
 	if self:InFight() then
 		return self.boss.zone, self.boss.ends
-	elseif self.bossZone then
-		local start = self:BossStart()
-		if at >= start then
-			return self.bossZone, start + self.tuning.boss.limit
-		end
+	end
+	local start = self:FightDue()
+	if start and at >= start then
+		return self.bossZone, start + self.tuning.boss.limit
 	end
 	return nil
 end
@@ -434,8 +477,42 @@ function World:UpdateBoss()
 			self:EndBoss("survived")
 		end
 	elseif self.bossZone and self.time >= self:BossStart() then
-		self:StartBoss()
+		if BossData(self:ZoneKey(self.bossZone)) then
+			self:StartBoss()
+		else
+			self:StartEscort()
+		end
 	end
+end
+
+-- A leader turns up in place of a boss (a Horde capital) and runs ahead
+-- for the rest of the zone. The next boss is due as after a fight.
+function World:StartEscort()
+	local zone = self.bossZone
+	local key = self:ZoneKey(zone)
+	local data = self:EscortData(key)
+	local every = self.tuning.boss.every
+	self.bossZone = self:FindBossZone(zone + self.rng:Int(every[1], every[2]))
+	self.escort = { name = data.name, key = key, zone = zone, start = self.time, thrown = 0, caught = 0 }
+	self:Emit({ type = "escortStart", name = data.name, key = key })
+end
+
+-- The leader throwing gifts in zone `zone` by run time `at`, if one is there
+-- or due and has had `lead` seconds to arrive: its data, else nil.
+function World:EscortDue(zone, at)
+	local data = self:EscortData(self:ZoneKey(zone))
+	if not data then
+		return nil
+	end
+	local start
+	if self.escort and self.escort.zone == zone then
+		start = self.escort.start
+	elseif self.bossZone == zone then
+		start = self:BossStart()
+	else
+		return nil
+	end
+	return at >= start + self.tuning.escort.lead and data or nil
 end
 
 -- A spear grabbed in a fight is thrown at the boss.
@@ -703,25 +780,35 @@ function World:SpawnWisps(items, start)
 	end
 end
 
--- An escort's gift (its zone's twist): thrown back down the road to land in
--- a lane at `at`. The zone's gifts take turns, starting again each zone. A
--- gift of coins is a short line of them.
-function World:SpawnGift(twist, zone, at)
+-- A leader's gift (Tuning.escorts): thrown back down the road to land in a
+-- lane at `at`. Their gifts take turns, starting again each zone. A gift of
+-- coins is a short line of them.
+function World:SpawnGift(data, zone, at)
 	local tuning = self.tuning
 	local escort = tuning.escort
 	if self.giftZone ~= zone then
 		self.giftZone, self.giftCount = zone, 0
 	end
 	self.giftCount = self.giftCount + 1
-	self.giftNext = at + twist.giftEvery
-	local kind = twist.gifts[(self.giftCount - 1) % #twist.gifts + 1]
+	self.giftNext = at + data.giftEvery
+	local kind = data.gifts[(self.giftCount - 1) % #data.gifts + 1]
 	local lane = self.rng:Int(1, #tuning.lanes)
 	local count = kind == "coins" and escort.coins or 1
+	-- The pieces of one gift share a group, so it's counted once, thrown
+	-- when its first piece is and caught when any piece is.
+	local group = {}
 	for index = 1, count do
 		local gift = self:AddEntity(kind == "coins" and "coin" or kind, lane, at + (index - 1) * escort.coinSpacing, GROUND_TOKEN_Z)
 		gift.thrown, gift.gift, gift.phase = true, true, "waiting"
 		gift.throwMax = escort.distance - 2
+		gift.giftGroup = group
+		gift.giftLead = index == 1
 	end
+end
+
+-- Seconds until the zone's escort leaves: the rest of the zone.
+function World:EscortLeft()
+	return math.max(0, self.zoneIndex * self.tuning.zoneLength - self.course)
 end
 
 -- Places the next chunk. Returns false when nothing can be placed yet (the
@@ -756,7 +843,7 @@ function World:SpawnChunk()
 		return true
 	end
 	-- And clear the road for a boss: its first throw arrives leadIn after it.
-	local bossStart = self.bossZone and self:BossStart()
+	local bossStart = self:FightDue()
 	if bossStart and self.cursor + duration > bossStart - tuning.zoneBreather then
 		self.cursor = math.max(self.cursor, bossStart + tuning.boss.leadIn)
 		return true
@@ -819,14 +906,15 @@ function World:SpawnChunk()
 	-- road after it so that taking it never costs you the next chunk.
 	local room = math.min(boundary, bossStart or math.huge) - tuning.zoneBreather - after
 	local extra = 0
+	local escort = self:EscortDue(zone, after)
 	if twist and twist.ventChance and twist.ventExtra < room and self.rng:Next() < twist.ventChance then
 		local lane = self.rng:Int(1, #tuning.lanes)
 		self:AddEntity("vent", lane, after, 0)
 		self:Record(after, lane, "B")
 		extra = twist.ventExtra
-	elseif twist and twist.gifts and twist.giftExtra < room and after >= (self.giftNext or 0) then
-		self:SpawnGift(twist, zone, after)
-		extra = twist.giftExtra
+	elseif escort and escort.giftExtra < room and after >= (self.giftNext or 0) then
+		self:SpawnGift(escort, zone, after)
+		extra = escort.giftExtra
 	elseif not pitNear then
 		-- (No jogger after a pit: they'd have jogged across it.)
 		self:SpawnAlliance(items, self.cursor, after, zone, twist and twist.allianceChance)
@@ -958,7 +1046,8 @@ end
 
 -- Simulation -----------------------------------------------------------------
 
-function World:ApplyPowerup(role)
+-- gift: true when it came from an escort.
+function World:ApplyPowerup(role, gift)
 	local tuning = self.tuning
 	if role == "shield" then
 		self.shield = true
@@ -969,7 +1058,7 @@ function World:ApplyPowerup(role)
 			self.skyNext = self.time + 1
 		end
 	end
-	self:Emit({ type = "powerup", role = role })
+	self:Emit({ type = "powerup", role = role, gift = gift })
 end
 
 function World:UpdatePowerups(h)
@@ -1004,6 +1093,12 @@ function World:UpdateZone()
 		local twist = self:Twist()
 		if twist and twist.shield and not self.shield then
 			self:ApplyPowerup("shield")
+		end
+		-- A leader running ahead leaves when their zone ends.
+		local escort = self.escort
+		if escort and escort.zone ~= index then
+			self.escort = nil
+			self:Emit({ type = "escortEnd", name = escort.name })
 		end
 	end
 end
@@ -1056,8 +1151,17 @@ end
 
 function World:Collect(entity)
 	local role = entity.role
+	-- An escort's gift is caught when any piece of it is taken.
+	local group, gift = entity.giftGroup, nil
+	if group and not group.caught then
+		group.caught = true
+		gift = true
+		if self.escort then
+			self.escort.caught = self.escort.caught + 1
+		end
+	end
 	if Rules.POWERUP[role] then
-		self:ApplyPowerup(role)
+		self:ApplyPowerup(role, gift)
 		return
 	elseif role == "spear" then
 		self:HitBoss()
@@ -1069,7 +1173,7 @@ function World:Collect(entity)
 	if role == "gem" then
 		self.gems = self.gems + 1
 	end
-	self:Emit({ type = "collect", role = role, points = points })
+	self:Emit({ type = "collect", role = role, points = points, gift = gift })
 end
 
 -- Running into an Alliance jogger knocks them flying, for points.
@@ -1199,6 +1303,10 @@ function World:Tick(h)
 			-- the speed (and so where throws leave and land) changes.
 			local phase = Rules.ThrowPhase(tuning, entity.y, self.speed, entity.throwMax)
 			if phase ~= "waiting" then
+				-- A gift is counted as thrown when its first piece leaves the hand.
+				if entity.giftLead and entity.phase == "waiting" and self.escort then
+					self.escort.thrown = self.escort.thrown + 1
+				end
 				entity.phase = phase
 			end
 		end

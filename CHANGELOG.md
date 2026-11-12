@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Thousand Needles: the crosswind can be seen. Streaks blow across the road the way it's blowing, and a gauge under the tokens shows its direction and counts down to when it turns, saying "Turning!" in the last second. The drift itself is unchanged.
+- Charging creatures are centred on their lane by how they look while running. Un'Goro's devilsaur ran a little to one side. Every charger was measured in game afterwards and all are centred.
+- Winterspring: a backup yeti that isn't in Forever is no longer offered in the Options model picker.
+- Horde capitals: Cairne, Thrall and Sylvanas only turn up in place of a boss. Bosses still come every 3 to 6 zones, and when one is due in Thunder Bluff, Orgrimmar or Undercity, that zone's leader comes instead (bosses due there used to wait for the next zone with a boss). They arrive with a "Here to help" banner, run ahead for the rest of the zone, and a green bar at the top shows who it is, what they throw, how many gifts you've caught of those thrown and how long until they leave. They shout encouragement as they go, and cheer when you catch a gift.
+- Wind Rider: you sit on the wyvern's back facing up the road. You used to stay apart from it, facing the camera, and the wyvern could show below the view.
+- Combos: a timer bar under the combo shows how long you have before it starts to run down, which is now five seconds, not six.
+- Pits differ by zone: fire in Burning Steppes, Ironforge and Orgrimmar, water in Ashenvale, Westfall, Moonglade, Stormwind and Darnassus, ice in Winterspring, tar in Un'Goro, slime in Undercity, a silithid burrow in Silithus and a rocky chasm elsewhere, each with the zone's own ground at the bottom. Game over says what you fell into.
+- Arnak Grimtotem, the Thousand Needles boss, never turned up: his model isn't in Forever. He now has backups, and a boss whose model doesn't load is swapped for its backup after 3 seconds, not 10.
+
 ## 0.12.0 (2026-11-12)
 
 - Combos: jumps, ducks, ramps and Alliance knocks in a row build a combo. Every five raise what a move pays (x1.5, x2, up to x3). Thick Hide breaking ends it. If you go six seconds without a move while there's something to do, it starts to run down by two every two seconds. The score panel shows it, and game over shows your best.

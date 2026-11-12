@@ -308,8 +308,22 @@ ns.commands["orc"] = function()
 end
 
 -- Left out of the help: for working out why a creature sits off its lane.
--- Lists the chargers and boss on screen with their measurements.
-ns.commands["measure"] = function()
+-- Lists the chargers and boss on screen with their measurements, or with
+-- "all", loads and checks every zone's charging creatures.
+ns.commands["measure"] = function(rest)
+	if (rest or ""):lower() == "all" then
+		local controller = ns.Controller
+		controller:Build()
+		if not controller.frame:IsShown() then
+			controller.frame:Show()
+		end
+		if controller.renderer:CheckChargers(ns.Print) then
+			ns.Print("Checking every charger: this takes a few seconds. Keep the window open.")
+		else
+			ns.Print("A check is already running.")
+		end
+		return
+	end
 	local renderer = ns.Controller.renderer
 	local lines = renderer and renderer:Measurements() or {}
 	if #lines == 0 then

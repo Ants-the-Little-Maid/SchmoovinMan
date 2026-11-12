@@ -227,6 +227,43 @@ ns.Assets = {
 		-- Seconds a bubble stays up, and the quiet gap before the next one.
 		duration = 2.2,
 		gap = 0.6,
+		-- What an escort (a Horde capital's twist) shouts as they run ahead:
+		-- `general` lines anyone might shout, `caught` when you catch a gift,
+		-- and lines of their own by name. The first comes `firstDelay`
+		-- seconds into the zone, and there are `gap` quiet seconds between them.
+		escort = {
+			firstDelay = 1.8,
+			gap = 3.5,
+			general = {
+				"Keep schmooving!",
+				"Schmoove like the wind!",
+				"That's how you schmoove!",
+				"Nobody schmooves like you!",
+				"Schmoove on, champion!",
+				"Don't stop schmooving now!",
+			},
+			caught = {
+				"Nice catch! Keep schmooving!",
+				"Schmoothly done!",
+				"Take it and schmoove!",
+				"Now THAT is schmooving!",
+			},
+			["Cairne Bloodhoof"] = {
+				"Schmoove with the strength of the Earth Mother!",
+				"Even the kodo envy your schmoove!",
+				"Schmoove proud, young one!",
+			},
+			["Thrall"] = {
+				"For the Horde! Keep schmooving!",
+				"The spirits bless this schmoove!",
+				"Lok'tar! Schmoove on!",
+			},
+			["Sylvanas Windrunner"] = {
+				"Schmoove, or be left behind.",
+				"Even the dead can't schmoove like that.",
+				"The Dark Lady commands it: schmoove!",
+			},
+		},
 	},
 
 	windRider = {
