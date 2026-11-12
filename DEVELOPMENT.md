@@ -4,7 +4,8 @@ How the addon is built, what was checked, and why things are the way they are. T
 
 **Status:** version 0.12.1 (2026-11-13): Horde leaders in place of bosses, the visible crosswind, pits that differ by zone, the combo timer, Wind Rider seating and chargers centred by their running box (see [CHANGELOG.md](CHANGELOG.md)). 0.12.0 (2026-11-12) added combos, pits with ramps, and a twist for every zone but Mulgore (see [CHANGELOG.md](CHANGELOG.md)). 0.11.1 (2026-11-11) added hazard markers, chargers and bosses centred on their lane, and nine fixes from a review of the whole addon (see [CHANGELOG.md](CHANGELOG.md)). 0.11.0 (2026-11-09) added the Options screen, starting speeds with a score multiplier, per-zone model picks and the resume countdown. 0.10.0 (2026-11-08) added bosses, the fight camera and the HUD layout that keeps the road clear.
 
-- **Tests:** all pass on 0.12.1 locally; 0.11.0 passed in GitHub Actions. See [Test results](#test-results).
+- **Release:** 0.12.1 isn't released yet. Tag `v0.12.1` was pushed on 2026-11-13 (on commit `da31db1`), but GitHub Actions failed one check with 15 s zones, so the release job never ran and nothing reached GitHub releases or CurseForge. That check ("Un'Goro has more power-ups") compared power-ups from a single run and came out 2 against 2 under Lua 5.1; it now counts over five seeds. To release, the tag has to move to a commit that passes (`git tag -f v0.12.1` and a forced push of the tag) or a new version be tagged. Ask the author first, as moving a pushed tag rewrites it.
+- **Tests:** all pass on 0.12.1 locally. In GitHub Actions, the `v0.12.1` tag failed the check above; 0.11.0 passed. See [Test results](#test-results).
 - **In game:** in 0.12.1, the leaders, zone pits, combo timer, Wind Rider seating and charger centring were built against the author's reports from play (2026-11-12). The crosswind streaks and gauge, and the fixes from the last review, haven't been seen in game yet, and the Barrens thunder lizard still runs off its lane. 0.12.0 has been played by the author, who found the combos, pits, ramps and zone twists working well (confirmed 2026-11-12). 0.11.1 was played before it, with the hazard markers and the charger centring checked (confirmed 2026-11-11). The released 0.11.0 was played and checked before it (confirmed 2026-11-10), including the Options screen, model picks, resume countdown, starting speeds, the ducking pose, hazard sizes, saved scores and the guild board.
 - **Still true from earlier versions:** `IsGeoReady` is only waited on for 1 second when it explicitly returns false. In Forever it never turns true for props loaded by file ID, and waiting on it in 0.7.1 hid them. Characters are measured by their active box with scale kept between 0.5 and 2.0, after a tester saw a tiny runner.
 
@@ -22,7 +23,11 @@ Arguments: addon folder, seeds, minutes per run, and optionally seconds per zone
 lua tests/schmoovin_smoke.lua . "$(grep -E '\.lua' SchmoovinMan.toc | tr -d '\r' | paste -sd,)"
 ```
 
-GitHub Actions runs both (short versions) on every push and before every release.
+GitHub Actions runs both (short versions) on every push and before every release, on Lua 5.1.5: `.github/workflows/release.yml` runs the logic tests at 25 s zones, again at 15 s zones (`. 4 5 15`), then the smoke test. A tag only packages if all three pass.
+
+Without a local Lua, the tests run under fengari (Lua 5.3 in JavaScript). Two things differ from CI:
+- 5.3-only calls (such as two-argument `math.atan`) pass locally and fail in CI. Use `math.atan2`, which the smoke test shims.
+- Numbers from the random generator can come out differently, so a seeded run that passes locally can meet different spawns in CI. A check that compares counts from bot runs should add them up over several seeds, not rely on one run (the Un'Goro power-up check failed this way on the `v0.12.1` tag).
 
 ## Releasing
 
@@ -79,6 +84,8 @@ Every WoW method the addon calls was checked against the generated API docs at t
 | `/schmoove zones 15`, `25`, `35` or `45` | Seconds per zone; the start screen's Zones button cycles the same choices |
 | `/schmoove speed 8`, `11` or `14` | Starting speed (Slow, Normal, Fast); the start screen's Start button cycles the same choices |
 | `/schmoove options` | Opens Options (also on the start and pause screens and in the minimap menu) |
+
+Left out of the help, for development: `/schmoove measure` lists the chargers and boss on screen with their box measurements, where the game says each was placed, and which model a boss that isn't showing is waiting for; `/schmoove measure all` loads and checks every zone's charger models (see [Test results](#test-results)).
 
 The minimap button (kodo icon) also opens or closes the game. Drag it to move it.
 
@@ -189,10 +196,10 @@ A design mock-up was approved on 2026-11-06. It shows the live run, a zone chang
 | Check | Result |
 |---|---|
 | Lua syntax | 0.11.0: all 27 Lua files (25 addon, 2 test) parse as Lua 5.1 (luaparse 0.3.1), rechecked 2026-11-10 |
-| 0.12.1 (2026-11-13, fengari) | All 27 Lua files parse as Lua 5.1. Logic tests, with CI's settings: 571 of 571 with 25 s zones and 559 of 559 with 15 s zones. New checks cover leaders only turning up in place of a boss, their gifts and counts, the combo timer, the crosswind's direction and turns, pit themes and Wind Rider placement. The smoke test passed, now also covering the leader's bar and shouts, the charger running box, `/schmoove measure all`, and the wind streaks and gauge. How the streaks look has no test |
+| 0.12.1 (2026-11-13, fengari) | All 27 Lua files parse as Lua 5.1. Logic tests, with CI's settings: 571 of 571 with 25 s zones and 559 of 559 with 15 s zones. New checks cover leaders only turning up in place of a boss, their gifts and counts, the combo timer, the crosswind's direction and turns, pit themes and Wind Rider placement. The smoke test passed, now also covering the leader's bar and shouts, the charger running box, `/schmoove measure all`, and the wind streaks and gauge. How the streaks look has no test. After the tag failed in CI (below), the Un'Goro power-up check counts over five seeds; 559 of 559 and 571 of 571 again |
 | 0.12.0 (2026-11-12, fengari) | All 27 Lua files parse as Lua 5.1. Logic tests, with CI's settings: 553 of 553 with 25 s zones and 541 of 541 with 15 s zones. New checks cover the combo multiplier and its run-down, pits and ramps, and each zone's twist: that it does what it says and stays fair by its numbers, with bot runs through the Barrens, Moonglade, Ironforge and Thunder Bluff. The smoke test passed, now also drawing a pit and ramp, a steam vent, a wisp and an escort with a gift in the air. How the hand-drawn pieces look has no test: that was checked in game |
 | 0.11.1 (2026-11-11, fengari) | All 27 Lua files parse as Lua 5.1. Logic tests, with CI's settings: 461 of 461 with 25 s zones and 449 of 449 with 15 s zones, with new checks that an entity keeps the zone it arrives in, that drained events come back once and that Alliance joggers keep out of a charger's lane. The smoke test passed, now also covering hazard markers and that a wrong `/schmoove zones` or `/schmoove speed` value leaves the setting alone. A run that crashes and is then closed, the crash text and each character's own best have no test of their own |
-| GitHub Actions (Lua 5.1.5) | 0.11.0: logic tests and smoke test passed on `main` and on tag `v0.11.0` (2026-11-09) |
+| GitHub Actions (Lua 5.1.5) | `v0.12.1` (2026-11-13): logic tests at 25 s zones passed; at 15 s zones 558 of 559, failing "Un'Goro has more power-ups" (2 against 2), so the smoke test and release were skipped. 0.11.0: logic tests and smoke test passed on `main` and on tag `v0.11.0` (2026-11-09) |
 | 0.11.0 logic tests (`tests/schmoovin_spec.lua`, fengari, 2026-11-10) | With CI's settings: 458 of 458 with 25 s zones (6 seeds x 5 minutes) and 446 of 446 with 15 s zones (4 seeds x 5 minutes). Checks added in 0.11.0 cover slow and fast starts: their speed, the score multiplier, fair spawns and the bot surviving them |
 | 0.11.0 smoke test (`tests/schmoovin_smoke.lua`, fengari, 2026-11-10) | Passed. Added in 0.11.0: `/schmoove speed`, the resume countdown, every Options row, model picks, their preview, that every zone and role offers named choices, and that resuming or starting a run closes Options |
 | History: 0.7.0 logic tests | With the multi-lane patterns: 396 of 396 passed with 25 s zones (20 seeds x 10 minutes); 356 of 356 with 15 s zones (10 seeds x 10 minutes); ducking on and off in both. The duck-only patterns are confirmed impossible without ducking and never picked with it off |

@@ -1350,10 +1350,17 @@ do
 	local function IsPowerup(entity)
 		return Rules.POWERUP[entity.role] ~= nil
 	end
-	local _, crater = Visit("ungoro", 150)
-	local _, craterPlain = Visit("ungoro", 150, Without("ungoro"))
-	check("Un'Goro has more power-ups", moreUps > usualUps * 1.5 and Count(crater, IsPowerup) > Count(craterPlain, IsPowerup),
-		("%d against %d"):format(Count(crater, IsPowerup), Count(craterPlain, IsPowerup)))
+	-- Counted over several runs: one run with short zones meets only a few,
+	-- too few to tell apart (2 against 2 with Lua 5.1's numbers).
+	local craterUps, plainUps = 0, 0
+	for seed = 13, 17 do
+		local _, crater = Visit("ungoro", 150, nil, seed)
+		local _, craterPlain = Visit("ungoro", 150, Without("ungoro"), seed)
+		craterUps = craterUps + Count(crater, IsPowerup)
+		plainUps = plainUps + Count(craterPlain, IsPowerup)
+	end
+	check("Un'Goro has more power-ups", moreUps > usualUps * 1.5 and craterUps > plainUps,
+		("%d against %d"):format(craterUps, plainUps))
 
 	-- Westfall: more gems.
 	local function IsGem(entity)
