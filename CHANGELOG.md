@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.12.1 (2026-11-13)
+## 0.12.2 (2026-11-13)
+
+0.12.1 was tagged but never released, so its changes are all here.
 
 - Thousand Needles: the crosswind can be seen. Streaks blow across the road the way it's blowing, and a gauge under the tokens shows its direction and counts down to when it turns, saying "Turning!" in the last second. The drift itself is unchanged.
 - Charging creatures are centred on their lane by how they look while running. Un'Goro's devilsaur ran a little to one side. Every charger was measured in game afterwards and all are centred.
