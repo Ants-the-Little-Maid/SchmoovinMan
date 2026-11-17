@@ -334,6 +334,26 @@ do
 	assert(head > 0.11, ("a %.1f-yard boss's head is behind the boss bar: %.2f from the top"):format(tallest, head))
 	assert(feet < 0.98, ("runner's feet out of view in a fight: %.2f from the top"):format(feet))
 	print(("fight view: tallest boss's head %.2f from the top, runner's feet %.2f"):format(head, feet))
+	-- At the top speed the boss stands further off, in step with the speed, so
+	-- its throws are in sight as long. The fog draws back that much further,
+	-- and its head is still under the boss bar.
+	do
+		local usual = world.tuning.baseSpeed
+		world.tuning.baseSpeed = ns.Tuning.maxSpeed
+		world.safeLeft = 1e9
+		Frames(0.05)
+		local farAway = ns.Tuning.boss.distance * ns.Tuning.maxSpeed / ns.Tuning.boss.farSpeed
+		assert(world.baseSpeed == ns.Tuning.maxSpeed and farAway > ns.Tuning.boss.distance + 10 and math.abs(r.bossY - farAway) < 1e-6,
+			("at the top speed the boss is %.1f yards off, not %.1f"):format(r.bossY, farAway))
+		local farCameraY, farCameraZ = Camera()
+		local farInto = (math.sqrt((farAway - farCameraY) ^ 2 + farCameraZ ^ 2) - rawget(sceneFrame, "fogNear")) / depth
+		assert(farInto <= 0.15 + 1e-6, ("a boss further off is deep in the fog: %.2f of the way in"):format(farInto))
+		assert(FromTop(farAway, tallest) > 0.11, "a boss further off has its head behind the boss bar")
+		world.tuning.baseSpeed = usual
+		world.safeLeft = 1e9
+		Frames(0.05)
+		assert(math.abs(r.bossY - ns.Tuning.boss.distance) < 1e-6, "the boss didn't come back to its usual spot: " .. r.bossY)
+	end
 	assert(hud.boss.lastAlpha == 1, "boss bar not showing after the banner: " .. tostring(hud.boss.lastAlpha))
 	print(("boss: %s, %d spears needed, up to %d landing marks"):format(world.boss.name, world.boss.needed, marks))
 	-- A spear grabbed is thrown at the boss.
@@ -536,7 +556,28 @@ do
 	assert(mount and mount.ready, "no wind rider")
 	local rider, wyvern = placed[R.runner.actor], placed[mount.actor]
 	assert(rider and wyvern and rider.yaw == wyvern.yaw and math.abs(rider.yaw - math.pi / 2) < 1e-9, "runner and wyvern don't both face up the road")
-	assert(rider.z > wyvern.z, "runner isn't on the wyvern's back")
+	-- The wyvern's box (4 yards tall in the stub) is seat of its height under
+	-- the runner, then raised by lift; more lift raises the wyvern.
+	local flight = R.FLIGHT
+	assert(math.abs(wyvern.z - (rider.z - 4 * flight.seat + flight.lift)) < 1e-6, "wyvern isn't where seat and lift put it: " .. tostring(wyvern.z - rider.z))
+	local lift = flight.lift
+	SlashCmdList.SCHMOOVINMAN("flight lift 0")
+	Frames(0.1)
+	assert(math.abs(placed[mount.actor].z - (placed[R.runner.actor].z - 4 * flight.seat)) < 1e-6 and placed[R.runner.actor].z > placed[mount.actor].z,
+		"with no lift, the runner isn't above the wyvern's box")
+	flight.lift = lift
+	local height, scale = R:MountSize()
+	assert(height == 4 and scale == 2, "wyvern's size not reported: " .. tostring(height))
+	assert(rider.y > wyvern.y, "runner isn't forward on the wyvern, with its tail behind")
+	-- /schmoove flight changes a setting, and leaves it alone on a wrong one.
+	local seat = R.FLIGHT.seat
+	SlashCmdList.SCHMOOVINMAN("flight seat 0.3")
+	assert(R.FLIGHT.seat == 0.3, "/schmoove flight didn't set the seat")
+	SlashCmdList.SCHMOOVINMAN("flight seat lots")
+	assert(R.FLIGHT.seat == 0.3, "/schmoove flight took a wrong value")
+	SlashCmdList.SCHMOOVINMAN("flight tilt 10")
+	assert(math.abs(R.FLIGHT.tilt - math.rad(10)) < 1e-9, "/schmoove flight tilt isn't in degrees")
+	R.FLIGHT.seat, R.FLIGHT.tilt = seat, 0
 	assert(attached == 0, "the runner was attached to the mount")
 	-- Let the flight run out and the runner come down.
 	Frames(ns.Tuning.durations.windRider + 2)
@@ -1050,7 +1091,7 @@ do
 	assert(not hud.wind.shown, "wind gauge shown without wind")
 	world.zoneOrder[world.zoneIndex] = "thousandneedles"
 	world.zoneKey = "thousandneedles"
-	local every = ns.Tuning.twists.thousandneedles.driftEvery
+	local every = ns.Tuning.twists.thousandneedles.blowEvery
 	-- Halfway through a spell of wind, well clear of a turn.
 	world.time = (math.floor(world.time / every) + 0.5) * every
 	world.safeLeft = 1e9
@@ -1062,10 +1103,154 @@ do
 	local direction = world:Wind()
 	assert(streaks > 10, "no wind streaks: " .. streaks)
 	assert(hud.wind.shown and hud.windText.value == (direction > 0 and "Wind  >>>" or "<<<  Wind"), "wind gauge: " .. tostring(hud.windText.value))
+	-- A jump there is carried one lane over, the way the wind blows. (The
+	-- next zone is windy too, in case this one ends during the jump; it's
+	-- put back after.)
+	local nextIndex = world.zoneIndex + 1
+	local nextZone = world.zoneOrder[nextIndex]
+	world.zoneOrder[nextIndex] = "thousandneedles"
+	local runner = world.runner
+	local lanes = ns.Tuning.lanes
+	assert(C.state == "running" and not runner.flying and runner.z == 0, "not running on the ground for the crosswind jump")
+	runner.lane, runner.laneX = 2, lanes[2]
+	Frames(0.05)
+	C.keys.scripts.OnKeyDown(C.keys, "W")
+	C.keys.scripts.OnKeyUp(C.keys, "W")
+	Frames(1.2)
+	assert(runner.lane == 2 + direction and math.abs(runner.x - lanes[2 + direction]) < 1e-6,
+		"a jump in the crosswind didn't land a lane over: lane " .. runner.lane)
+	world.zoneOrder[nextIndex] = nextZone
 	world.zoneOrder[world.zoneIndex] = "mulgore"
 	world.zoneKey = "mulgore"
 	Frames(0.05)
 	assert(not hud.wind.shown, "wind gauge stayed on after the wind")
+end
+-- An icy road: glints on it, and a lane change slides past its lane and
+-- comes back, scraping lines on the road and throwing up a spray.
+do
+	local C = ns.Controller
+	local world = C.world
+	local r = C.renderer
+	local runner = world.runner
+	local lanes = ns.Tuning.lanes
+	local ice = ns.Tuning.twists.winterspring
+	world.entities = {}
+	world.cursor = 1e9
+	world.safeLeft = 1e9
+	local function Count(test)
+		local count = 0
+		for index = 1, r.markers.count do
+			if test(r.markers[index]) then
+				count = count + 1
+			end
+		end
+		return count
+	end
+	Frames(0.05)
+	assert(r.markers.count == 0 and runner.skid == nil, "ice drawn off the ice: " .. r.markers.count)
+	world.zoneOrder[world.zoneIndex] = "winterspring"
+	world.zoneKey = "winterspring"
+	-- (The next zone is icy too, in case this one ends meanwhile; it's put
+	-- back after.)
+	local nextIndex = world.zoneIndex + 1
+	local nextZone = world.zoneOrder[nextIndex]
+	world.zoneOrder[nextIndex] = "winterspring"
+	assert(C.state == "running" and not runner.flying and runner.z == 0, "not running on the ground for the ice")
+	local lane = runner.lane
+	local way = lane == #lanes and -1 or 1
+	runner.laneX = lanes[lane]
+	Frames(0.05)
+	-- Glints and the scraped lines lie flat, just over the road: glints 0.01
+	-- yards up and white, the lines 0.02 up and blue.
+	local function Flat(marker, z)
+		return marker.quad and not marker.fade and not marker.glow and not marker.tex and marker.q[3] == z
+	end
+	local function Glint(marker)
+		return Flat(marker, 0.01) and marker.r == 1
+	end
+	local glints = Count(Glint)
+	assert(glints > 5 and runner.skid == ice.skid, "no glints on the ice: " .. glints)
+	assert(Glint(r.markers[1]), "the ice isn't drawn first, under everything else on the road")
+	-- None is drawn across a pit, whose hole it would show over.
+	local pit = world:AddEntity("pit", 2, world.time - 1, 0)
+	pit.leave = world.time + 30
+	Frames(0.05)
+	assert(Count(Glint) == 0 and r.markers.count > 0, "glints drawn across a pit: " .. Count(Glint))
+	world.entities = {}
+	Frames(0.05)
+	assert(Count(Glint) > 5, "glints didn't come back after the pit")
+	-- The runner leans into the slide by its sideways speed, the same on
+	-- every frame of the lane change, whatever the frame rate.
+	local rolls = {}
+	local realPlace = r.scene.Place
+	r.scene.Place = function(scene, actor, x, y, z, yaw, scale, pitch, roll, ...)
+		if actor == r.runner.actor then
+			rolls[#rolls + 1] = roll
+		end
+		return realPlace(scene, actor, x, y, z, yaw, scale, pitch, roll, ...)
+	end
+	local key = way > 0 and "D" or "A"
+	C.keys.scripts.OnKeyDown(C.keys, key)
+	C.keys.scripts.OnKeyUp(C.keys, key)
+	local furthest, scrapes, spray = 0, 0, 0
+	for _ = 1, 30 do
+		Frames(0.02)
+		furthest = math.max(furthest, (runner.x - lanes[lane + way]) * way)
+		scrapes = math.max(scrapes, Count(function(marker) return Flat(marker, 0.02) and marker.r < 0.5 end))
+		spray = math.max(spray, Count(function(marker) return marker.fade end))
+	end
+	assert(math.abs(furthest - ice.skid) < 0.05, "a lane change on ice didn't skid past its lane: " .. furthest)
+	assert(scrapes >= 2 and spray == 3, ("sliding on ice drew %d scrapes and %d puffs of spray"):format(scrapes, spray))
+	r.scene.Place = realPlace
+	local lean = -way * (lanes[2] - lanes[1]) / ice.laneChange * 0.025
+	assert(#rolls == 30 and math.abs(rolls[3] - lean) < 1e-6 and math.abs(rolls[10] - lean) < 1e-6,
+		("the runner doesn't lean by its speed: %s and %s, not %s"):format(tostring(rolls[3]), tostring(rolls[10]), lean))
+	Frames(0.6)
+	assert(runner.lane == lane + way and math.abs(runner.x - lanes[lane + way]) < 1e-6 and runner.slide == 0,
+		"a skid didn't come back to its lane: " .. runner.x)
+	world.zoneOrder[nextIndex] = nextZone
+	world.zoneOrder[world.zoneIndex] = "mulgore"
+	world.zoneKey = "mulgore"
+	-- The scraped lines stay on the road until they're out of view.
+	Frames(1.5)
+	assert(r.markers.count == 0 and runner.skid == nil, "ice still drawn after the ice: " .. r.markers.count)
+	runner.lane, runner.laneX = lane, lanes[lane]
+	Frames(0.05)
+end
+-- A sandstorm gust (Silithus) pulls the fog in, but leaves gustSee seconds
+-- of road in sight however fast you're going.
+do
+	local C = ns.Controller
+	local world = C.world
+	local r = C.renderer
+	local sand = ns.Tuning.twists.silithus
+	world.entities = {}
+	world.cursor = 1e9
+	world.safeLeft = 1e9
+	local index = world.zoneIndex
+	local nextZone = world.zoneOrder[index + 1]
+	world.zoneOrder[index], world.zoneOrder[index + 1] = "silithus", "silithus"
+	world.zoneKey = "silithus"
+	-- The middle of a gust.
+	world.time = (math.floor(world.time / sand.gustEvery) + 1) * sand.gustEvery + sand.gustLength / 2
+	Frames(0.05)
+	local far = r.zone.fog.far
+	assert(world:Twist() == sand and not r.bossRecord and world.speed * sand.gustSee < far * (1 - sand.gustPull),
+		("no sandstorm at an ordinary speed, with no boss: twist %s, boss %s, %.1f yd/s"):format(tostring(world:Twist() == sand), tostring(r.bossRecord ~= nil), world.speed))
+	assert(math.abs(r.fogPull - sand.gustPull * far) < 1e-6, "a gust at an ordinary speed pulls the fog in by " .. tostring(r.fogPull))
+	local usual = world.tuning.baseSpeed
+	world.tuning.baseSpeed = ns.Tuning.maxSpeed
+	world.safeLeft = 1e9
+	Frames(0.05)
+	local left = far - r.fogPull
+	assert(world.speed == ns.Tuning.maxSpeed and r.fogPull > 0 and r.fogPull < sand.gustPull * far and math.abs(left - sand.gustSee * world.speed) < 1e-6,
+		("a gust at the top speed leaves %.1f yards in sight, not %.1f"):format(left, sand.gustSee * world.speed))
+	world.tuning.baseSpeed = usual
+	world.zoneOrder[index + 1] = nextZone
+	world.zoneOrder[world.zoneIndex] = "mulgore"
+	world.zoneKey = "mulgore"
+	world.safeLeft = 1e9
+	Frames(0.05)
 end
 -- Things drawn by hand: a pit and its ramp, a steam vent, a wisp, and an
 -- escort with a gift in the air.

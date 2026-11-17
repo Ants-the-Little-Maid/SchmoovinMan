@@ -11,6 +11,8 @@ local _, ns = ...
 -- right across the road, after its one row of ramps and edges.
 -- A pattern with `twist = "field"` is only used in a zone whose twist
 -- (Tuning.twists) has that field.
+-- A pattern with `rareFrom = zone` is an easy one: from that zone on it is
+-- only RARE times as likely, so later zones are mostly the harder ones.
 local Patterns = {}
 ns.Patterns = Patterns
 
@@ -24,17 +26,19 @@ local function Line(code, lane, count, spacing, start)
 	return rows
 end
 
+Patterns.RARE = 1 / 3
+
 Patterns.LIST = {
-	{ name = "coinLine", minZone = 1, weight = 3, rows = Line("c", 2, 6, 0.22) },
-	{ name = "lowCenter", minZone = 1, weight = 3, rows = { { 0, "c.c" }, { 0.25, "cAc" }, { 0.5, "c.c" } } },
-	{ name = "lowPair", minZone = 1, weight = 3, rows = { { 0, "LL." }, { 0.25, "..c" }, { 0.5, "..c" }, { 1.1, ".LL" }, { 1.35, "c.." } } },
-	{ name = "blockWeave", minZone = 1, weight = 3, rows = { { 0, "B.." }, { 0.3, ".c." }, { 1.1, "..B" }, { 1.4, ".c." }, { 2.2, "B.." } } },
-	{ name = "jumpLine", minZone = 1, weight = 2, rows = { { 0, ".A." }, { 0.9, ".A." }, { 1.8, ".A." } } },
+	{ name = "coinLine", minZone = 1, rareFrom = 7, weight = 3, rows = Line("c", 2, 6, 0.22) },
+	{ name = "lowCenter", minZone = 1, rareFrom = 7, weight = 3, rows = { { 0, "c.c" }, { 0.25, "cAc" }, { 0.5, "c.c" } } },
+	{ name = "lowPair", minZone = 1, rareFrom = 7, weight = 3, rows = { { 0, "LL." }, { 0.25, "..c" }, { 0.5, "..c" }, { 1.1, ".LL" }, { 1.35, "c.." } } },
+	{ name = "blockWeave", minZone = 1, rareFrom = 7, weight = 3, rows = { { 0, "B.." }, { 0.3, ".c." }, { 1.1, "..B" }, { 1.4, ".c." }, { 2.2, "B.." } } },
+	{ name = "jumpLine", minZone = 1, rareFrom = 7, weight = 2, rows = { { 0, ".A." }, { 0.9, ".A." }, { 1.8, ".A." } } },
 	{ name = "powerup", minZone = 1, weight = 2, rows = { { 0, "c.c" }, { 0.3, ".P." }, { 0.6, "c.c" } } },
 	{ name = "gemDodge", minZone = 1, weight = 1, rows = { { 0, "BgB" }, { 0.8, "c.c" } } },
-	{ name = "highBar", minZone = 2, weight = 3, rows = { { 0, "BH." }, { 1.0, ".HB" } } },
-	{ name = "wallGap", minZone = 2, weight = 3, rows = { { 0, "WW." }, { 1.2, ".WW" }, { 2.4, "WW." } } },
-	{ name = "highLow", minZone = 2, weight = 2, rows = { { 0, "H.L" }, { 0.5, "..c" }, { 1.0, ".B." } } },
+	{ name = "highBar", minZone = 2, rareFrom = 9, weight = 3, rows = { { 0, "BH." }, { 1.0, ".HB" } } },
+	{ name = "wallGap", minZone = 2, rareFrom = 9, weight = 3, rows = { { 0, "WW." }, { 1.2, ".WW" }, { 2.4, "WW." } } },
+	{ name = "highLow", minZone = 2, rareFrom = 9, weight = 2, rows = { { 0, "H.L" }, { 0.5, "..c" }, { 1.0, ".B." } } },
 	{ name = "charger", minZone = 3, weight = 3, rows = { { 0, "c.c" }, { 0.5, ".C." }, { 0.8, "c.c" } } },
 	{ name = "doubleCharger", minZone = 3, weight = 2, rows = { { 0, "C.." }, { 1.0, ".c." }, { 1.0, "..C" } } },
 	{ name = "chargeWall", minZone = 3, weight = 2, rows = { { 0, "C.W" }, { 0.3, ".g." } } },
@@ -46,19 +50,35 @@ Patterns.LIST = {
 	-- Multi-lane hazards: one barrier across two or three lanes, always with a
 	-- free lane or a jump/duck way through. needsDuck patterns are only used
 	-- with ducking on; with it off their bars would close every lane.
-	{ name = "logJump", minZone = 2, weight = 2, rows = { { 0, "AAA" }, { 0.6, "c.c" } } },
+	{ name = "logJump", minZone = 2, rareFrom = 9, weight = 2, rows = { { 0, "AAA" }, { 0.6, "c.c" } } },
 	{ name = "wallJump", minZone = 3, weight = 2, rows = { { 0, "WWL" }, { 0.5, "..c" }, { 1.0, ".c." } } },
 	{ name = "limbo", minZone = 3, weight = 2, needsDuck = true, rows = { { 0, "HHH" }, { 0.4, ".c." } } },
 	{ name = "barricade", minZone = 4, weight = 2, rows = { { 0, "WW." }, { 1.0, "LLL" } } },
 	{ name = "underpass", minZone = 4, weight = 2, needsDuck = true, rows = { { 0, "HHB" }, { 1.0, "BHH" } } },
 	{ name = "hurdles", minZone = 5, weight = 1, needsDuck = true, rows = { { 0, "LLL" }, { 0.9, "HHH" }, { 1.8, "LLL" } } },
 
+	-- Late zones. Rows here are close to the fairness limits at the tightest
+	-- tempo: a lane a row, two lanes between walls, a jump as soon as one is
+	-- allowed after the last. Coins lie in the open lane, to show the way.
+	{ name = "staircase", minZone = 6, weight = 2, rows = { { 0, "BBc" }, { 0.5, "BcB" }, { 1.0, "cBB" }, { 1.5, "BcB" }, { 2.0, "BBc" } } },
+	{ name = "pillars", minZone = 6, weight = 2, rows = { { 0, "BcB" }, { 0.5, "cBc" }, { 1.0, "BcB" }, { 1.5, "cBc" } } },
+	{ name = "chargerWave", minZone = 7, weight = 2, rows = { { 0, "C.C" }, { 0.6, ".C." }, { 1.2, "C.C" } } },
+	{ name = "duckWeave", minZone = 7, weight = 2, needsDuck = true, rows = { { 0, "HBH" }, { 0.5, "BHB" }, { 1.0, "HBH" } } },
+	{ name = "wallWeave", minZone = 8, weight = 2, rows = { { 0, "WWc" }, { 1.0, "cWW" }, { 2.0, "WWc" }, { 3.0, "cWW" } } },
+	{ name = "funnel", minZone = 8, weight = 2, rows = { { 0, "BcB" }, { 0.5, "BAB" }, { 1.0, "cBc" } } },
+	{ name = "hopSkip", minZone = 9, weight = 2, rows = { { 0, "LLL" }, { 0.65, "BcB" }, { 1.3, "LLL" } } },
+	{ name = "stepsAcross", minZone = 9, weight = 2, needsDuck = true, rows = { { 0, "LBB" }, { 0.8, "BHB" }, { 1.6, "BBL" } } },
+	{ name = "crossJump", minZone = 10, weight = 2, rows = { { 0, "WWA" }, { 1.3, "AWW" } } },
+	{ name = "upDown", minZone = 10, weight = 2, needsDuck = true, rows = { { 0, "LHL" }, { 0.65, "HLH" }, { 1.3, "LHL" } } },
+	{ name = "onslaught", minZone = 12, weight = 2, needsDuck = true, rows = { { 0, "LLL" }, { 0.65, "BcB" }, { 1.3, "HHH" }, { 1.95, "cBB" }, { 2.6, "LLL" } } },
+	{ name = "gateRun", minZone = 12, weight = 2, rows = { { 0, "BcB" }, { 0.5, "BAB" }, { 1.0, "cBB" }, { 1.5, "BcB" }, { 2.0, "BBc" }, { 2.72, "LLL" } } },
+
 	-- Stampede country (the Barrens' twist): two chargers abreast.
 	{ name = "chargerPair", minZone = 3, weight = 2, twist = "chargers", rows = { { 0, ".c." }, { 0.5, "C.C" }, { 0.8, ".c." } } },
 
 	-- Pits: get to a lane with a ramp, which throws you over. Two ramps are
 	-- easier to reach than one; mirroring puts a side ramp on either side.
-	{ name = "pitTwoRamps", minZone = 2, weight = 2, pit = { 2, 2 }, rows = { { 0, "RXR" } } },
+	{ name = "pitTwoRamps", minZone = 2, rareFrom = 9, weight = 2, pit = { 2, 2 }, rows = { { 0, "RXR" } } },
 	{ name = "pitSideRamps", minZone = 2, weight = 2, pit = { 2, 3 }, rows = { { 0, "RRX" } } },
 	{ name = "pitMiddleRamp", minZone = 3, weight = 2, pit = { 2, 3 }, rows = { { 0, "XRX" } } },
 	{ name = "pitOneRamp", minZone = 4, weight = 2, pit = { 2, 3 }, rows = { { 0, "RXX" } } },
@@ -75,6 +95,10 @@ Patterns.LIMITS = {
 	jumpThenJump = 0.75,
 	jumpThenDuck = 0.35,
 	duckThenJump = 0.3,
+	-- In a crosswind: how long after the row it jumped a blown jump may still
+	-- be over the lane it left (one taken at the last moment is clear of
+	-- anything standing there within 0.46 s, at the slowest speed).
+	blowClear = 0.5,
 }
 
 -- Turns a pattern into a flat list of { t, lane, code }, scaled by tempo.
@@ -155,9 +179,13 @@ end
 Patterns.HasHazard = HasHazard
 
 -- A pattern's weight in a zone with this twist: more chargers, power-ups or
--- token-only patterns where the twist says so.
-local function Weight(pattern, twist)
+-- token-only patterns where the twist says so, and less of an easy pattern
+-- from the zone it turns rare in.
+local function Weight(pattern, twist, zone)
 	local weight = pattern.weight
+	if pattern.rareFrom and zone and zone >= pattern.rareFrom then
+		weight = weight * Patterns.RARE
+	end
 	if twist then
 		if twist.chargers and Has(pattern, "C") then
 			weight = weight * twist.chargers
@@ -172,13 +200,15 @@ local function Weight(pattern, twist)
 	return weight
 end
 
+Patterns.Weight = Weight
+
 -- Weighted pick among patterns unlocked by this zone. With ducking off,
 -- patterns that need it are left out. `accept`, if given, must also pass
 -- (a boss uses it for hazards that fit before it gives up); with it, nil
 -- comes back when nothing does. `twist`: the zone's, if it has one.
 function Patterns.Pick(rng, zone, duckEnabled, accept, twist)
 	local pattern = ns.Random.Weighted(Patterns.LIST, function(item)
-		return Allowed(item, zone, duckEnabled, twist) and (not accept or accept(item)) and Weight(item, twist) or 0
+		return Allowed(item, zone, duckEnabled, twist) and (not accept or accept(item)) and Weight(item, twist, zone) or 0
 	end, rng:Next())
 	if pattern then
 		return pattern, rng:Next() < 0.5
@@ -213,6 +243,14 @@ end
 -- of the first impossible row. States carry over between calls.
 -- laneChangeTime: seconds a lane change takes, where it isn't the usual
 -- (on ice, for placing something between rows whose spacing allows for it).
+-- An item to jump may have `wind` (1 or -1): a crosswind that carries the
+-- jump one lane that way, if the road goes that far. The jump then only
+-- counts as a way through if that lane holds nothing at that row but
+-- something to jump too, and the state's `lane` is the lane landed in, with
+-- `at` the lane to be in at the row. For blowClear seconds after, it may
+-- still be over the lane it left, so a row in that time can't be passed if
+-- that lane holds anything but something to jump. (Fighting the wind with a
+-- lane change isn't counted on: there may be more ways through than this finds.)
 function Patterns.Feasible(items, tuning, states, laneChangeTime)
 	local limits = Patterns.LIMITS
 	local moveCost = (laneChangeTime or tuning.laneChangeTime) + limits.reaction
@@ -223,25 +261,37 @@ function Patterns.Feasible(items, tuning, states, laneChangeTime)
 		local t = items[index].t
 		local requirement = {}
 		local hasRequirement = false
+		local wind
 		while index <= #items and math.abs(items[index].t - t) < 1e-6 do
 			local item = items[index]
 			local need = Patterns.REQUIREMENT[item.code]
 			if need then
 				requirement[item.lane] = Combine(requirement[item.lane], need)
 				hasRequirement = true
+				wind = wind or item.wind
 			end
 			index = index + 1
 		end
 
 		if hasRequirement then
-			local nextStates = {}
+			-- The best state for each lane ended up in.
+			local byLane = {}
 			for lane = 1, 3 do
 				local need = requirement[lane]
-				if need ~= "avoid" then
-					local best
+				-- Where a jump here comes down, and what's in the way of it.
+				local land, inTheWay = lane, nil
+				if need == "jump" and wind and lane + wind >= 1 and lane + wind <= 3 then
+					land = lane + wind
+					inTheWay = requirement[land]
+				end
+				if need ~= "avoid" and (inTheWay == nil or inTheWay == "jump") then
+					local best = byLane[land]
 					for _, state in ipairs(states) do
 						local elapsed = t - state.t
-						if math.abs(lane - state.lane) * moveCost <= elapsed + 1e-9 then
+						-- Blown here off a jump in the next lane a moment ago: it may
+						-- still be over that lane, and run into what stands there.
+						local over = state.at and state.at ~= state.lane and elapsed < limits.blowClear and requirement[state.at]
+						if math.abs(lane - state.lane) * moveCost <= elapsed + 1e-9 and (not over or over == "jump") then
 							local ok = true
 							if need == "jump" then
 								ok = t - state.jump >= limits.jumpThenJump - 1e-9 and t - state.duck >= limits.duckThenJump - 1e-9
@@ -250,22 +300,31 @@ function Patterns.Feasible(items, tuning, states, laneChangeTime)
 							end
 							if ok then
 								local candidate = {
-									lane = lane,
+									lane = land,
+									at = lane,
 									t = t,
 									jump = need == "jump" and t or state.jump,
 									duck = need == "duck" and t or state.duck,
 									parent = state,
 								}
-								-- Keep the state whose last actions are oldest: it has the most freedom.
-								if not best or candidate.jump + candidate.duck < best.jump + best.duck then
+								-- Keep the state whose last actions are oldest: it has the most
+								-- freedom. Of two alike, one that wasn't blown here: it isn't
+								-- still over the lane it left.
+								local age = candidate.jump + candidate.duck
+								local bestAge = best and best.jump + best.duck
+								if not best or age < bestAge or (age == bestAge and land == lane and best.at ~= best.lane) then
 									best = candidate
 								end
 							end
 						end
 					end
-					if best then
-						nextStates[#nextStates + 1] = best
-					end
+					byLane[land] = best
+				end
+			end
+			local nextStates = {}
+			for lane = 1, 3 do
+				if byLane[lane] then
+					nextStates[#nextStates + 1] = byLane[lane]
 				end
 			end
 			if #nextStates == 0 then

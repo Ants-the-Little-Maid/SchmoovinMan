@@ -30,7 +30,9 @@ Fields:
   runner = { lane, x, z, state, flying }   state: run | jump | duck | fly | crash
   boss = nil, or the latest fight: { key, name, zone, start, ends, needed, hits,
       state = "fight" | "driven" | "survived", endedAt }
-  entities = array of { id, role, lane, x, y, z, arrive, magnet, smashed, knocked, thrown }
+  entities = array of { id, role, lane, x, y, z, arrive, magnet, smashed, knocked, thrown, wind }
+      wind: on something to jump in a crosswind, which way a jump over it is
+            blown (1 right, -1 left)
       role: low | high | block | wall | charger | vent | pit | pitedge | ramp | coin | gem |
             wisp | alliance | spear |
             windRider | magnet | shield | goldRush | stampede | tauren
@@ -80,6 +82,8 @@ local AIR_TOKEN_Z = 2.2
 -- What a boss throws for each pattern code: hazards only, and a charging
 -- creature becomes a block (it can't be thrown; a block asks the same of you).
 local BOSS_CODE = { L = "L", A = "L", H = "H", B = "B", W = "W", C = "B" }
+-- What a straggler can be (Tuning.straggler): the last only with ducking on.
+local STRAGGLERS = { "L", "B", "H" }
 local NEVER = -1000
 -- What a combo can be kept up on (with Alliance joggers).
 local MOVE_ROLE = { low = true, high = true, ramp = true, alliance = true }
@@ -220,17 +224,25 @@ function World:UpdateCombo(h)
 	end
 end
 
--- Sets the runner up for the zone's twist: slower lane changes on ice,
--- floaty jumps by moonlight, and a crosswind that turns round every
--- driftEvery seconds.
+-- Sets the runner up for the zone's twist: slower lane changes on ice, that
+-- slide past the lane and back; floaty jumps by moonlight; and a crosswind
+-- that carries it a lane over in the air and turns round every blowEvery
+-- seconds.
 function World:ApplyTwist()
 	local twist = self:Twist()
 	local runner = self.runner
 	runner.laneChangeTime = twist and twist.laneChange or nil
+	runner.skid = twist and twist.skid or nil
+	runner.skidBack = twist and twist.skidBack or nil
 	runner.gravity = twist and twist.gravity or nil
 	runner.jumpSpeed = twist and twist.jumpSpeed or nil
-	local direction = self:Wind()
-	runner.drift = direction and direction * twist.drift or 0
+	runner.wind = self:Wind()
+end
+
+-- Which way a crosswind that turns every `every` seconds blows at run time
+-- `at`: 1 for right (+x) or -1 for left.
+local function WindDirection(every, at)
+	return math.floor(at / every) % 2 == 0 and 1 or -1
 end
 
 -- A crosswind (the zone's twist): which way it blows, 1 for right (+x) or
@@ -238,12 +250,84 @@ end
 -- By run time, not the zone clock, so it still turns in a boss fight.
 function World:Wind()
 	local twist = self:Twist()
-	if not (twist and twist.drift) then
+	local every = twist and twist.blowEvery
+	if not every then
 		return nil
 	end
-	local every = twist.driftEvery
-	local turn = math.floor(self.time / every)
-	return turn % 2 == 0 and 1 or -1, (turn + 1) * every - self.time
+	return WindDirection(every, self.time), (math.floor(self.time / every) + 1) * every - self.time
+end
+
+-- The crosswind in zone number `zone` at run time `arrive`: the wind a jump
+-- over something arriving then is blown by (see WindFits). Nil where that
+-- zone has none.
+function World:WindFor(zone, arrive)
+	local twist = self:TwistFor(zone)
+	local every = twist and twist.blowEvery
+	if not every then
+		return nil
+	end
+	return WindDirection(every, arrive)
+end
+
+-- True when a chunk's items, from `start`, suit the crosswind of `zone`:
+-- nothing to jump, and no ramp, arrives within blowQuiet seconds of the wind
+-- turning (so whenever you take off for it, it's in the wind it was laid
+-- for), and the fairness check finds a way through with each jump blown a
+-- lane over.
+-- codes: what the item codes stand for, where they aren't used as they are
+-- (a boss's throws).
+function World:WindFits(items, start, zone, codes)
+	local twist = self:TwistFor(zone)
+	local timed = {}
+	for _, item in ipairs(items) do
+		local code = item.code
+		if codes then
+			code = codes[code]
+		end
+		if code then
+			local arrive = start + item.t
+			local jump = Patterns.REQUIREMENT[code] == "jump"
+			-- (A ramp's throw leaves the ground too, as the ramp is touched.)
+			if (jump or code == "R") and arrive % twist.blowEvery < twist.blowQuiet then
+				return false
+			end
+			timed[#timed + 1] = { t = arrive, lane = item.lane, code = code, wind = jump and self:WindFor(zone, arrive) or nil }
+		end
+	end
+	return (Patterns.Feasible(timed, self.tuning))
+end
+
+-- Chunks tried, and the moments a chunk may be put off by, for a crosswind.
+local WIND_TRIES = 8
+local WIND_DELAYS = { 0, 0.35, 0.7 }
+
+-- A chunk for a zone with a crosswind: the one picked if it fits (WindFits),
+-- else its mirror image, or either a moment later (the cursor moves on), or
+-- another pick (`repick`, which returns a pattern and whether it's
+-- mirrored), until one does. Returns the pattern and whether it's mirrored,
+-- or nil when nothing fits.
+-- room: seconds the chunk must be over in, put off or not (a boss's throws,
+-- which end before it gives up).
+function World:PickForWind(zone, tempo, pattern, mirrored, repick, codes, room)
+	local tuning = self.tuning
+	for _ = 1, WIND_TRIES do
+		if not pattern then
+			return nil
+		end
+		local duration = Patterns.Duration(pattern, tempo)
+		for flip = 1, 2 do
+			local side = (flip == 2) ~= mirrored
+			local items = Patterns.Expand(pattern, tempo, side, tuning.duckEnabled)
+			for _, delay in ipairs(WIND_DELAYS) do
+				if (not room or duration + delay <= room) and self:WindFits(items, self.cursor + delay, zone, codes) then
+					self.cursor = self.cursor + delay
+					return pattern, side
+				end
+			end
+		end
+		pattern, mirrored = repick()
+	end
+	return nil
 end
 
 -- Speed shown at a zone-clock time: yours, or in an orc run the Tauren's.
@@ -585,9 +669,14 @@ local SOLID_ROLE = { low = true, high = true, block = true, wall = true, charger
 -- only a lane with nothing solid along that stretch is used, so they never
 -- run through a hazard. `items` are the chunk just placed, from `start`.
 -- chance: the zone's own, where its twist sets one (crowded streets).
+-- One that finds no clear lane waits for the next gap (after the tightest
+-- late patterns there's often none), so they come as often there.
 function World:SpawnAlliance(items, start, arrive, zone, chance)
 	local alliance = self.tuning.alliance
-	if not alliance or zone < alliance.minZone or self.rng:Next() >= (chance or alliance.chance) then
+	if not alliance or zone < alliance.minZone then
+		return
+	end
+	if not self.allianceWaiting and self.rng:Next() >= (chance or alliance.chance) then
 		return
 	end
 	-- Anything arriving from `from` on lies on the stretch they jog over.
@@ -615,11 +704,14 @@ function World:SpawnAlliance(items, start, arrive, zone, chance)
 	if #free > 0 then
 		self:AddEntity("alliance", self.rng:Pick(free), arrive, 0)
 	end
+	self.allianceWaiting = #free == 0
 end
 
-function World:Record(arrive, lane, code)
+-- wind: for something to jump in a crosswind, which way it'll blow you
+-- (World:WindFor), so the fairness check knows.
+function World:Record(arrive, lane, code, wind)
 	if self.timeline then
-		local record = { t = arrive, lane = lane, code = code }
+		local record = { t = arrive, lane = lane, code = code, wind = wind }
 		self.timeline[#self.timeline + 1] = record
 		return record
 	end
@@ -683,6 +775,39 @@ function World:PlaceSpears(hazards, from, to, count, earliest)
 	return #placedAt
 end
 
+-- True when a chunk of this pattern, thrown by a boss, leaves a spot for a
+-- spear (World:SpearSafe) in its time or the gap after it, where
+-- PlaceSpears looks. The tightest late patterns may not. Remembered for each
+-- pattern at each spacing.
+function World:SpearRoom(pattern, tempo, gap, stretch)
+	local key = tempo .. "/" .. gap
+	local rooms = self.spearRooms
+	if not rooms then
+		rooms = {}
+		self.spearRooms = rooms
+	end
+	local known = rooms[pattern]
+	if known and known.key == key then
+		return known.room
+	end
+	local hazards = {}
+	for _, item in ipairs(Patterns.Expand(pattern, tempo, false, self.tuning.duckEnabled)) do
+		local code = BOSS_CODE[item.code]
+		if code then
+			hazards[#hazards + 1] = { t = item.t, lane = item.lane, code = code }
+		end
+	end
+	local last = Patterns.Duration(pattern, tempo) + math.max(0, gap - 0.6 * stretch)
+	local room = false
+	for step = 0, math.floor(last / 0.15) do
+		for lane = 1, #self.tuning.lanes do
+			room = room or self:SpearSafe(hazards, lane, step * 0.15)
+		end
+	end
+	rooms[pattern] = { key = key, room = room }
+	return room
+end
+
 -- A chunk the boss throws: the pattern's hazards (see BOSS_CODE) and spears
 -- in safe spots. Returns false when there's no room before the boss gives up.
 function World:SpawnBossChunk(zone, ends)
@@ -694,13 +819,44 @@ function World:SpawnBossChunk(zone, ends)
 	local tempo, gap, stretch, laneTime = self:Spacing(zone)
 	self.spearStretch, self.spearLaneTime = stretch, laneTime
 	local room = ends - tuning.zoneBreather - self.cursor
-	local pattern, mirrored = Patterns.Pick(self.rng, zone, tuning.duckEnabled, function(item)
+	-- Spears still to offer this fight: spearSupply times those needed.
+	local plan = self.spearPlan
+	if not plan or plan.zone ~= zone then
+		plan = { zone = zone, left = math.ceil(Rules.SpearsNeeded(tuning, zone) * tuning.boss.spearSupply) }
+		self.spearPlan = plan
+	end
+	local function Fits(item)
 		return Patterns.HasHazard(item) and not item.pit and Patterns.Duration(item, tempo) <= room
-	end)
+	end
+	-- Once a throw has left out spears it should have had, and while some
+	-- are still owed, only a pattern that leaves a spot for one; if none of
+	-- those fits, any.
+	local function Pick()
+		if plan.left > 0 and plan.behind then
+			local pattern, mirrored = Patterns.Pick(self.rng, zone, tuning.duckEnabled, function(item)
+				return Fits(item) and self:SpearRoom(item, tempo, gap, stretch)
+			end)
+			if pattern then
+				return pattern, mirrored
+			end
+		end
+		return Patterns.Pick(self.rng, zone, tuning.duckEnabled, Fits)
+	end
+	local pattern, mirrored = Pick()
 	if not pattern then
 		-- None fits: no more throws this fight.
 		self.bossFull = zone
 		return false
+	end
+	local windy = self:WindFor(zone, self.cursor) ~= nil
+	if windy then
+		-- A crosswind: only throws that can be passed in the wind they'll meet.
+		pattern, mirrored = self:PickForWind(zone, tempo, pattern, mirrored, Pick, BOSS_CODE, room)
+		if not pattern then
+			-- Nothing suits the wind just now: the boss holds its throw a moment.
+			self.cursor = self.cursor + gap
+			return true
+		end
 	end
 	local duration = Patterns.Duration(pattern, tempo)
 	local hazards = {}
@@ -711,28 +867,27 @@ function World:SpawnBossChunk(zone, ends)
 			local entity = self:AddEntity(CODE_ROLE[code], item.lane, arrive, 0)
 			entity.thrown = true
 			entity.phase = "waiting"
-			entity.record = self:Record(arrive, item.lane, code)
-			hazards[#hazards + 1] = { t = arrive, lane = item.lane, code = code }
+			local wind = windy and Patterns.REQUIREMENT[code] == "jump" and self:WindFor(zone, arrive) or nil
+			entity.wind = wind
+			entity.record = self:Record(arrive, item.lane, code, wind)
+			hazards[#hazards + 1] = { t = arrive, lane = item.lane, code = code, wind = wind }
 		end
 	end
 	table.sort(hazards, function(a, b)
 		return a.t < b.t
 	end)
 
-	-- Spears: spearSupply times those needed over the fight, shared out over
+	-- Spears: those still to offer (`plan`), shared out over
 	-- the throws still to come (a little ahead, so none are left over), and
 	-- placed up to 0.6 s before the next chunk so any lane can be reached for
 	-- it, and no nearer than 0.45 s after the last one (both longer on ice).
-	local plan = self.spearPlan
-	if not plan or plan.zone ~= zone then
-		plan = { zone = zone, left = math.ceil(Rules.SpearsNeeded(tuning, zone) * tuning.boss.spearSupply) }
-		self.spearPlan = plan
-	end
 	local window = duration + gap
 	local remaining = math.max(window, ends - tuning.zoneBreather - self.cursor)
 	local count = math.min(plan.left, math.ceil(plan.left * window / remaining))
 	local earliest = self.cursor - math.max(0, gap - 0.45 * stretch)
-	plan.left = plan.left - self:PlaceSpears(hazards, self.cursor, self.cursor + duration + math.max(0, gap - 0.6 * stretch), count, earliest)
+	local placed = self:PlaceSpears(hazards, self.cursor, self.cursor + duration + math.max(0, gap - 0.6 * stretch), count, earliest)
+	plan.left = plan.left - placed
+	plan.behind = placed < count
 	self.cursor = self.cursor + duration + gap
 	return true
 end
@@ -811,6 +966,28 @@ function World:EscortLeft()
 	return math.max(0, self.zoneIndex * self.tuning.zoneLength - self.course)
 end
 
+-- A straggler (Tuning.straggler): sometimes, in the later zones, one more
+-- obstacle on its own in the gap after a chunk, at `at`. Returns the seconds
+-- of clear road to add after it, or nil when there's none this time.
+-- room: seconds left before a zone change or a boss. stretch: what the
+-- zone's twist stretches its spacing by (ice, moonlight).
+function World:SpawnStraggler(zone, at, room, stretch)
+	local tuning = self.tuning
+	local chance = Rules.StragglerChance(tuning, zone)
+	if chance <= 0 then
+		return nil
+	end
+	local extra = tuning.straggler.extra * stretch
+	if extra >= room or self.rng:Next() >= chance then
+		return nil
+	end
+	local code = STRAGGLERS[self.rng:Int(1, tuning.duckEnabled and 3 or 2)]
+	local lane = self.rng:Int(1, #tuning.lanes)
+	self:AddEntity(CODE_ROLE[code], lane, at, 0).straggler = true
+	self:Record(at, lane, code)
+	return extra
+end
+
 -- Places the next chunk. Returns false when nothing can be placed yet (the
 -- boss is still out and has no room for another throw).
 function World:SpawnChunk()
@@ -823,14 +1000,32 @@ function World:SpawnChunk()
 	local zone = Rules.ZoneIndex(tuning, self.cursor - self.paused)
 	local twist = self:TwistFor(zone)
 	local pattern, mirrored = Patterns.Pick(self.rng, zone, tuning.duckEnabled, nil, twist)
-	local tempo, gap = self:Spacing(zone)
+	local tempo, gap, stretch = self:Spacing(zone)
+	local windy = twist and twist.blowEvery ~= nil
+	if windy then
+		-- A crosswind: only a chunk that can be passed in the wind it'll meet
+		-- (one with nothing but tokens if nothing else fits, which asks nothing).
+		pattern, mirrored = self:PickForWind(zone, tempo, pattern, mirrored, function()
+			return Patterns.Pick(self.rng, zone, tuning.duckEnabled, nil, twist)
+		end)
+		if not pattern then
+			pattern, mirrored = Patterns.Pick(self.rng, zone, tuning.duckEnabled, function(item)
+				return not Patterns.HasHazard(item)
+			end, twist)
+			if not pattern then
+				-- Nor one of those: clear road for a moment.
+				self.cursor = self.cursor + gap
+				return true
+			end
+		end
+	end
 	local duration = Patterns.Duration(pattern, tempo)
 	-- A pit lasts as long as its length takes to cover at the speed it's met
 	-- at, plus the moment past its far edge that a ramp sets you down.
-	local pitNear, pitLeave
+	local pitNear, pitLeave, speedAt
 	if pattern.pit then
 		local pit = tuning.pit
-		local speedAt = Rules.Speed(tuning, math.max(0, self.cursor - self.paused))
+		speedAt = Rules.Speed(tuning, math.max(0, self.cursor - self.paused))
 		pitNear = self.cursor + pit.lead / speedAt
 		pitLeave = pitNear + self.rng:Int(pattern.pit[1], pattern.pit[2]) * pit.tile / speedAt
 		duration = pitLeave - self.cursor + pit.landing
@@ -853,6 +1048,8 @@ function World:SpawnChunk()
 	for _, item in ipairs(items) do
 		local arrive = self.cursor + item.t
 		local code = item.code
+		-- In a crosswind, which way a jump over this will be blown.
+		local wind = windy and Patterns.REQUIREMENT[code] == "jump" and self:WindFor(zone, arrive) or nil
 		if code == "P" then
 			-- (Sooner after the last one where the zone's twist says so.)
 			if arrive - self.lastPowerupTime >= tuning.powerupMinGap * (twist and twist.powerupGap or 1) then
@@ -865,7 +1062,7 @@ function World:SpawnChunk()
 				self:AddEntity("coin", item.lane, arrive, GROUND_TOKEN_Z)
 			end
 		elseif code == "A" then
-			self:AddEntity("low", item.lane, arrive, 0)
+			self:AddEntity("low", item.lane, arrive, 0).wind = wind
 			self:AddEntity("coin", item.lane, arrive, AIR_TOKEN_Z)
 		elseif code == "a" then
 			self:AddEntity("coin", item.lane, arrive, AIR_TOKEN_Z)
@@ -881,13 +1078,25 @@ function World:SpawnChunk()
 			ramp.leave = pitLeave
 			ramp.near = pitNear
 			local coins = math.floor((pitLeave - pitNear) * self.speed / tuning.pit.tile + 0.5) * tuning.pit.coins
+			-- In a crosswind the flight is carried a lane over, and the coins
+			-- lie along it (if the road goes that far). It's carried from the
+			-- moment the ramp is first touched, which is before it arrives.
+			local carried = windy and self:WindFor(zone, arrive)
+			if carried and not tuning.lanes[item.lane + carried] then
+				carried = nil
+			end
+			local takeoff = arrive - (Rules.SHAPES.ramp.halfDepth + tuning.runnerHalfDepth) / (speedAt or self.speed)
 			for index = 1, coins do
-				self:AddEntity("coin", item.lane, pitNear + (pitLeave - pitNear) * (index - 0.5) / coins, AIR_TOKEN_Z)
+				local at = pitNear + (pitLeave - pitNear) * (index - 0.5) / coins
+				local coin = self:AddEntity("coin", item.lane, at, AIR_TOKEN_Z)
+				if carried then
+					coin.x = coin.x + carried * Rules.Blown(tuning, at - takeoff)
+				end
 			end
 		else
-			self:AddEntity(CODE_ROLE[code], item.lane, arrive, 0)
+			self:AddEntity(CODE_ROLE[code], item.lane, arrive, 0).wind = wind
 		end
-		self:Record(arrive, item.lane, code)
+		self:Record(arrive, item.lane, code, wind)
 	end
 	if pitNear then
 		-- The hole itself, for drawing: lane 2, as it's centred on the road.
@@ -916,7 +1125,11 @@ function World:SpawnChunk()
 		self:SpawnGift(escort, zone, after)
 		extra = escort.giftExtra
 	elseif not pitNear then
-		-- (No jogger after a pit: they'd have jogged across it.)
+		-- A straggler, in the later zones, and perhaps an Alliance jogger, who
+		-- keeps out of its lane. (Neither after a pit: a jogger would have
+		-- jogged across it. And no straggler in a crosswind, where a jump just
+		-- blown may still be over the lane it left.)
+		extra = not windy and self:SpawnStraggler(zone, after, room, stretch) or 0
 		self:SpawnAlliance(items, self.cursor, after, zone, twist and twist.allianceChance)
 	end
 	self.cursor = self.cursor + duration + gap + extra
@@ -1301,7 +1514,7 @@ function World:Tick(h)
 		if entity.thrown and entity.phase ~= "landed" then
 			-- Once thrown it stays thrown, and once down it stays down, even if
 			-- the speed (and so where throws leave and land) changes.
-			local phase = Rules.ThrowPhase(tuning, entity.y, self.speed, entity.throwMax)
+			local phase = Rules.ThrowPhase(tuning, entity.y, self.speed, entity.throwMax, Rules.Far(tuning, self.baseSpeed))
 			if phase ~= "waiting" then
 				-- A gift is counted as thrown when its first piece leaves the hand.
 				if entity.giftLead and entity.phase == "waiting" and self.escort then

@@ -435,7 +435,7 @@ function Hud:Update(world, best, zoneName, now)
 			self.windText:SetText(label)
 			self.windText:SetTextColor(UI.Hex(turning and UI.COLORS.orange or UI.COLORS.white))
 		end
-		self.windBar:SetValue(turnsIn / world:Twist().driftEvery)
+		self.windBar:SetValue(turnsIn / world:Twist().blowEvery)
 	end
 	local combo = world.combo or 0
 	if self:Changed("combo", combo) then

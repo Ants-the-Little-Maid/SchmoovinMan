@@ -32,7 +32,8 @@ ns.Tuning = {
 	rampPerSecond = 0.03,
 	zoneBump = 2.2,
 	bumpTime = 1.5,
-	maxSpeed = 38,
+	-- (Reached on entering zone 14 with the usual zones and starting speed.)
+	maxSpeed = 48,
 
 	-- Spawning. A chunk is spawned when its first row is this far away.
 	spawnAhead = 80,
@@ -50,9 +51,6 @@ ns.Tuning = {
 
 	-- Runner.
 	laneChangeTime = 0.14,
-	-- How fast a crosswind pushes you off your lane's middle in the air, and
-	-- lets you back onto it on landing, in yards a second.
-	driftRate = 2.5,
 	gravity = 30,
 	jumpSpeed = 10.5,
 	fastFallSpeed = 16,
@@ -133,15 +131,30 @@ ns.Tuning = {
 	--               reaction time (0.15 s) for each lane moved; spacing is at
 	--               least (laneChange + 0.15) / (laneChangeTime + 0.15), so
 	--               whatever can be passed elsewhere can be passed there
+	--   skid, skidBack  arriving in a lane on the ground there, you slide
+	--               `skid` yards past its middle, slowing from the speed you
+	--               came in at, and come back over skidBack seconds
+	--               (Rules.Skid). It's shorter than the reach of a pick-up in
+	--               your own lane and stops short of anything in the next,
+	--               so it changes how a lane change looks and feels, not what
+	--               you hit or pick up. A lane change in the air doesn't skid,
+	--               and one that ran less than a lane skids that much less
 	--   ventChance  chance of a lava vent in the gap after a chunk; ventExtra
 	--               seconds of clear road are added after it, so it can always
 	--               be stepped round and the next chunk still reached
 	--   gustEvery, gustLength, gustPull  a gust every so many seconds, lasting
-	--               gustLength, that pulls the fog in by gustPull of its range
-	--               (drawing only)
-	--   drift, driftEvery  yards a crosswind pushes you sideways in the air
-	--               (too little to reach the next lane's hazard), turning
-	--               round every driftEvery seconds
+	--               gustLength, that pulls the fog in by gustPull of its range,
+	--               but never so far that less than gustSee seconds of road
+	--               is left in sight (drawing only)
+	--   blowEvery, blowQuiet  a crosswind that turns round every blowEvery
+	--               seconds. In the air (a jump, a ramp's throw, the drop after
+	--               a Wind Rider) it carries you one lane over, the way it blew
+	--               when you left the ground: slowly at first, so you're still
+	--               over what you jumped (Rules.Blown), and not past the road's
+	--               edge. Chunks there are only ones that can be passed blown
+	--               like that, and nothing to jump, and no ramp, arrives in
+	--               the first blowQuiet seconds after a turn, so whenever you
+	--               leave the ground for it, it's in the wind it was laid for
 	--   steam       the vents are steam vents (Ironforge): the same rule, drawn
 	--               as a grate and a plume
 	--   chargers, chargerEarly  what the weight of patterns with a charging
@@ -160,10 +173,10 @@ ns.Tuning = {
 	--   allianceChance  the chance of an Alliance jogger after a chunk there
 	--   shield      you're given Thick Hide on entering the zone
 	twists = {
-		winterspring = { name = "Icy road: lane changes slide", laneChange = 0.2, spacing = 1.25 },
+		winterspring = { name = "Icy road: lane changes slide", laneChange = 0.2, spacing = 1.25, skid = 0.7, skidBack = 0.4 },
 		burningsteppes = { name = "Lava vents: keep off the glow", ventChance = 0.45, ventExtra = 0.8 },
-		silithus = { name = "Sandstorm: gusts hide the road", gustEvery = 11, gustLength = 5, gustPull = 0.4 },
-		thousandneedles = { name = "Crosswind: jumps drift", drift = 0.4, driftEvery = 4 },
+		silithus = { name = "Sandstorm: gusts hide the road", gustEvery = 11, gustLength = 5, gustPull = 0.4, gustSee = 1.15 },
+		thousandneedles = { name = "Crosswind: jumps blow you a lane over", blowEvery = 4, blowQuiet = 0.65 },
 		barrens = { name = "Stampede country: more chargers", chargers = 3, chargerEarly = 1 },
 		ashenvale = { name = "Wisps: follow them through", wisps = true },
 		ungoro = { name = "Crystal pylons: more power-ups", powerups = 3, powerupGap = 0.5 },
@@ -198,6 +211,17 @@ ns.Tuning = {
 	-- chunk, from this zone on, at this share of your speed.
 	alliance = { chance = 0.35, minZone = 1, speedShare = 0.45 },
 
+	-- Stragglers: from zone `from`, the gap after a chunk sometimes holds one
+	-- more obstacle on its own, to jump, duck or step round: `chance` of one
+	-- in that zone and `perZone` more each zone after, up to `max`. It stands
+	-- half a gap after the chunk, which is time to step out of its lane, and
+	-- `extra` seconds of clear road are added after it, so any lane of the
+	-- next chunk can still be reached, and jumped in if this was jumped.
+	-- Never after a pit, in a crosswind, in a boss fight, or where a zone's
+	-- vent or a leader's gift has the spot. An Alliance jogger may still come
+	-- in the same gap, keeping out of its lane.
+	straggler = { from = 8, chance = 0.2, perZone = 0.05, max = 0.5, extra = 0.4 },
+
 	-- Bosses. The first comes in a random zone from `first`; after each fight
 	-- the next comes `every` zones later (a random count in that range). A zone
 	-- with no boss passes it on to the next zone that has one. The boss turns up
@@ -219,20 +243,26 @@ ns.Tuning = {
 		spearSupply = 1.6,
 		-- Where the boss stands, in yards ahead. A thrown hazard leaves its hand
 		-- `throwLead` seconds before it would reach you (no further than
-		-- `throwMax` yards) and lands `landLead` seconds before; near top speed
-		-- the throwMax cap brings that down to about a second.
+		-- `throwMax` yards) and lands `landLead` seconds before; by farSpeed
+		-- yards a second the throwMax cap has brought that down to about a
+		-- second. Faster than farSpeed, the boss stands further off and throws
+		-- from further, in step with your speed (Rules.Far), so it's never
+		-- less than that. A leader and their gifts do the same (Tuning.escort).
 		distance = 58,
 		throwLead = 2.4,
 		throwMax = 54,
 		landLead = 1.1,
+		farSpeed = 38,
 	},
 
 	-- Orc runs (see Data/OrcRun.lua). The orc runs at the zone-1 speed all run.
 	-- Tauren come up from behind `taurenLead` yards a second faster at first,
 	-- and speed up on the normal speed curve (a rise through each zone and a
-	-- step up on each new one), so they get harder to dodge.
+	-- step up on each new one), so they get harder to dodge, until that curve
+	-- reaches `maxSpeed` (an orc run's own, not the one above).
 	orcRun = {
 		taurenLead = 5,
+		maxSpeed = 38,
 		-- A Tauren appears this far back (the bottom of the pulled-back view) and
 		-- is gone this far ahead. Coins left behind go at despawnBehind.
 		spawnBehind = 20,

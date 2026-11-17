@@ -11,7 +11,7 @@ Open it with `/schmoove` or the kodo button on the minimap. Right-click the butt
   - The capitals: Stormwind, Darnassus, Ironforge, Thunder Bluff, Orgrimmar and Undercity.
 - **Three lanes, five moves**: change lane, jump, duck, and power-ups that let you fly or smash through.
 - **Hazards that fit each zone**: logs, totems, ruin walls, bars to duck under, and charging kodos, devilsaurs and yetis.
-- **Pits** right across the road, with fire at the bottom: get to a ramp and it throws you over.
+- **Pits** right across the road, with something different at the bottom in each zone (fire, water, ice, tar, slime and more): get to a ramp and it throws you over.
 - **Zone twists**: most zones have a rule of their own. An icy road in Winterspring, lava vents in Burning Steppes, floaty jumps in Moonglade, wisps that show the way in Ashenvale and more.
 - **Combos**: jumps, ducks, ramps and knocks in a row pay more, up to three times.
 - **Five power-ups**:

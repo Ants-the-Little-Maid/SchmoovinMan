@@ -38,13 +38,45 @@ function Rules.OrcSpeed(tuning)
 end
 
 function Rules.TaurenSpeed(tuning, time)
-	return Rules.Speed(tuning, time) + tuning.orcRun.taurenLead
+	return math.min(Rules.Speed(tuning, time), tuning.orcRun.maxSpeed or math.huge) + tuning.orcRun.taurenLead
 end
 
 -- Orc runs: seconds between rows of Tauren in a zone.
 function Rules.RowGap(tuning, zone)
 	local orc = tuning.orcRun
 	return math.max(orc.rowGapMin, orc.rowGapStart - orc.rowGapPerZone * (zone - 1))
+end
+
+-- How far a crosswind has carried you, in yards, `airTime` seconds after you
+-- left the ground: a whole lane by the time an ordinary jump lands, and no
+-- further. It starts slowly (by the square of the time), so at the top of a
+-- jump you're still over what you jumped, a quarter of a lane across.
+function Rules.Blown(tuning, airTime)
+	local share = math.min(1, airTime / Rules.BlowTime(tuning))
+	return (tuning.lanes[2] - tuning.lanes[1]) * share * share
+end
+
+-- Seconds a crosswind takes to carry you a lane: an ordinary jump's time in the air.
+function Rules.BlowTime(tuning)
+	return 2 * tuning.jumpSpeed / tuning.gravity
+end
+
+-- How far past the middle of its lane a runner has slid on ice, in yards, `t`
+-- seconds after arriving there at `rate` yards a second sideways: out to
+-- `length`, slowing all the way from the speed it came in at, then back over
+-- `back` seconds, gently at both ends (at once, with no `back`). Nil once
+-- it's back.
+function Rules.Skid(length, rate, back, t)
+	local out = 2 * length / rate
+	if t < out then
+		local left = 1 - t / out
+		return length * (1 - left * left)
+	end
+	local share = back and back > 0 and (t - out) / back or 1
+	if share >= 1 then
+		return nil
+	end
+	return length * (1 - share * share * (3 - 2 * share))
 end
 
 -- Row spacing multiplier for chunks: 1 at the start, smaller later.
@@ -55,6 +87,15 @@ end
 -- Seconds between chunks.
 function Rules.Gap(tuning, zone)
 	return math.max(tuning.gapMin, tuning.gapStart - tuning.gapPerZone * (zone - 1))
+end
+
+-- The chance of a straggler in the gap after a chunk in a zone (Tuning.straggler).
+function Rules.StragglerChance(tuning, zone)
+	local straggler = tuning.straggler
+	if not straggler or zone < straggler.from then
+		return 0
+	end
+	return math.min(straggler.max, straggler.chance + straggler.perZone * (zone - straggler.from))
 end
 
 -- Time points earned per second in a zone.
@@ -148,14 +189,21 @@ function Rules.SpearsNeeded(tuning, zone)
 	return boss.spears + math.max(0, math.floor((zone - boss.spearsFrom) / boss.spearsEvery))
 end
 
+-- How many times further off than Tuning says a boss or a leader stands, and
+-- throws from, at a base running speed: no further up to boss.farSpeed, then
+-- in step with the speed, so a throw is in sight for as long as at farSpeed.
+function Rules.Far(tuning, speed)
+	return math.max(1, speed / tuning.boss.farSpeed)
+end
+
 -- Where a thrown hazard is, from its distance ahead (y) and your speed:
 -- "waiting" in the boss's hand, "flying" toward where it lands (with progress
 -- from 0 at the throw to 1 on landing) or "landed" on the road.
 -- throwMax: the furthest it's thrown from, where that isn't the boss's (an
--- escort's gift).
-function Rules.ThrowPhase(tuning, y, speed, throwMax)
+-- escort's gift). far: how many times further that is just now (Rules.Far).
+function Rules.ThrowPhase(tuning, y, speed, throwMax, far)
 	local boss = tuning.boss
-	local launch = math.min(throwMax or boss.throwMax, speed * boss.throwLead)
+	local launch = math.min((throwMax or boss.throwMax) * (far or 1), speed * boss.throwLead)
 	local land = math.min(launch * 0.7, speed * boss.landLead)
 	if y > launch then
 		return "waiting", 0

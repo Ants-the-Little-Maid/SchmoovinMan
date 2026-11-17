@@ -334,6 +334,34 @@ ns.commands["measure"] = function(rest)
 	end
 end
 
+-- Left out of the help: for fitting the runner onto the wind rider in game.
+-- "/schmoove flight" lists the settings; "/schmoove flight seat 0.4" sets
+-- one until the UI reloads.
+ns.commands["flight"] = function(rest)
+	local flight = ns.Renderer.FLIGHT
+	local key, value = (rest or ""):match("^(%a+)%s+(%-?[%d%.]+)$")
+	key, value = key and key:lower(), tonumber(value)
+	if key and value and flight[key] then
+		flight[key] = key == "tilt" and math.rad(value) or value
+	elseif rest and rest ~= "" then
+		ns.Print("Try /schmoove flight lift 2.5 (also seat, back, look, or tilt in degrees).")
+	end
+	ns.Print(("Wind Rider: lift %.2f yd, seat %.2f of its height, back %.2f yd, camera look %.2f yd, tilt %.1f degrees"):format(
+		flight.lift, flight.seat, flight.back, flight.look, math.deg(flight.tilt)))
+	ns.Print("More lift raises the wyvern; more back moves you forward on it; lower look shows more under you; more tilt looks down.")
+	-- Its size, to report back: it's what the lift should come to stand on.
+	local renderer = ns.Controller.renderer
+	local height, scale = nil, nil
+	if renderer then
+		height, scale = renderer:MountSize()
+	end
+	if height then
+		ns.Print(("The wyvern's box is %.2f yd tall at scale %.2f."):format(height, scale))
+	else
+		ns.Print("The wyvern's size shows here once you've flown this session.")
+	end
+end
+
 ns.commands["help"] = PrintHelp
 
 SLASH_SCHMOOVINMAN1 = "/schmoove"

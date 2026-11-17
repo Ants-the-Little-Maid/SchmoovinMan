@@ -6,17 +6,43 @@ local Runner = {}
 Runner.__index = Runner
 ns.Runner = Runner
 
+-- `from`, moved toward `to` by at most `most`.
+local function Toward(from, to, most)
+	if math.abs(to - from) <= most then
+		return to
+	end
+	return from + (to > from and most or -most)
+end
+
 function Runner.New(tuning)
 	local self = setmetatable({}, Runner)
 	self.tuning = tuning
 	self.lane = 2
 	self.x = tuning.lanes[2]
-	-- x is where the lane change has got to (laneX) plus any sideways drift
-	-- from a crosswind (offset). The world sets laneChangeTime, drift, gravity
-	-- and jumpSpeed for the zone's twist; nil (0 for drift) otherwise.
+	-- x is where the lane change has got to (laneX) plus how far a crosswind
+	-- has carried you (offset) and how far you've slid past your lane on ice
+	-- (slide). The world sets laneChangeTime, skid, skidBack, wind, gravity
+	-- and jumpSpeed for the zone's twist; nil otherwise.
 	self.laneX = tuning.lanes[2]
 	self.offset = 0
-	self.drift = 0
+	-- slideAt: seconds since you arrived in the lane you're sliding past, and
+	-- slideWay the way you came in, 1 (right) or -1; nil when not sliding.
+	-- slideLength and slideBack: how far this slide goes and how long it takes
+	-- to come back. run: how far the lane change has come the same way
+	-- (runWay) without stopping, which settles them.
+	self.slide = 0
+	self.slideAt = nil
+	self.slideWay = nil
+	self.run = 0
+	self.runWay = nil
+	-- Sideways speed in yards a second, for drawing (the lean, the spray on ice).
+	self.vx = 0
+	-- wind: which way a crosswind blows now, 1 (right) or -1, or nil. blow:
+	-- the way it blew when you left the ground, while you're in the air.
+	self.wind = nil
+	self.blow = nil
+	self.inAir = false
+	self.airTime = 0
 	self.z = 0
 	self.vz = 0
 	self.state = "run"
@@ -35,6 +61,17 @@ end
 
 function Runner:IsAirborne()
 	return self.z > 0 or self.vz > 0
+end
+
+-- The lane a crosswind is carrying you to in the air: the next one over the
+-- way it blew when you left the ground, if the road goes that far, else your
+-- own. You come down there unless the jump is cut short.
+function Runner:LandingLane()
+	local blow = self.blow
+	if blow and self.tuning.lanes[self.lane + blow] then
+		return self.lane + blow
+	end
+	return self.lane
 end
 
 -- Returns an event name when the input did something.
@@ -92,6 +129,7 @@ end
 
 function Runner:Crash()
 	self.state = "crash"
+	self.vx = 0
 end
 
 -- Advances one fixed step. Returns "land" on touching down from a jump.
@@ -99,32 +137,94 @@ function Runner:Update(h)
 	local tuning = self.tuning
 	local event
 
-	-- Lateral: move toward the chosen lane at a constant rate.
-	local targetX = tuning.lanes[self.lane]
-	local laneWidth = tuning.lanes[2] - tuning.lanes[1]
-	local step = laneWidth / (self.laneChangeTime or tuning.laneChangeTime) * h
-	local laneX = self.laneX
-	if math.abs(targetX - laneX) <= step then
-		laneX = targetX
-	else
-		laneX = laneX + (targetX > laneX and step or -step)
-	end
-	self.laneX = laneX
+	local lanes = tuning.lanes
+	local laneWidth = lanes[2] - lanes[1]
 
-	-- A crosswind pushes you sideways while you're in the air (not on a Wind
-	-- Rider); on the ground you come back to the middle of your lane.
-	local want = (self.z > 0 and not self.flying and self.state ~= "crash") and (self.drift or 0) or 0
-	local offset = self.offset
-	if offset ~= want then
-		local slide = (tuning.driftRate or 2.5) * h
-		if math.abs(want - offset) <= slide then
-			offset = want
-		else
-			offset = offset + (want > offset and slide or -slide)
+	-- A crosswind carries you while you're in the air (a jump, a ramp's throw
+	-- or the drop after a Wind Rider, but not on one), the way it blew when
+	-- you left the ground. Coming down more than half a lane across puts you
+	-- in the next lane; less, and you come back to your own.
+	local airborne = self.z > 0 and not self.flying and self.state ~= "crash"
+	if airborne and not self.inAir then
+		self.inAir, self.airTime, self.blow = true, 0, self.wind
+	elseif not airborne and self.inAir then
+		self.inAir = false
+		local blow, to = self.blow, self:LandingLane()
+		if to ~= self.lane and math.abs(self.offset) >= laneWidth / 2 then
+			-- Where you are stays put: only which lane it's counted from changes.
+			self.lane = to
+			self.laneX = self.laneX + blow * laneWidth
+			self.offset = self.offset - blow * laneWidth
 		end
-		self.offset = offset
+		self.blow = nil
 	end
-	self.x = laneX + offset
+
+	-- Lateral: move toward the chosen lane at a constant rate.
+	local targetX = lanes[self.lane]
+	local laneRate = laneWidth / (self.laneChangeTime or tuning.laneChangeTime)
+	local step = laneRate * h
+	local from = self.laneX
+	local laneX = Toward(from, targetX, step)
+	local way = laneX > from and 1 or laneX < from and -1 or 0
+	self.laneX = laneX
+	-- How far it has come the same way without stopping.
+	if way ~= 0 and way == self.runWay then
+		self.run = self.run + math.abs(laneX - from)
+	else
+		self.runWay, self.run = way ~= 0 and way or nil, math.abs(laneX - from)
+	end
+
+	-- On ice (a zone's twist): arriving in a lane on the ground, you slide
+	-- past its middle and come back (Rules.Skid): the whole skid after a whole
+	-- lane or more, and less after less, so turning back at once is only a
+	-- wobble. It never takes you out of reach of what's in your lane or into
+	-- reach of what's in the next. A new lane change ends it, and what's left
+	-- of it goes as fast as the change does: turning back you're where you'd
+	-- be without it by the time it's gone, and going on you hold still until
+	-- the change catches up.
+	local slideTo = 0
+	if laneX ~= targetX or not self.skid then
+		self.slideAt = nil
+	elseif way ~= 0 then
+		if self.z <= 0 and not self.flying then
+			local share = math.min(1, self.run / laneWidth)
+			self.slideAt, self.slideWay = 0, way
+			self.slideLength, self.slideBack = self.skid * share, self.skidBack and self.skidBack * share
+		end
+	elseif self.slideAt then
+		self.slideAt = self.slideAt + h
+		local slid = ns.Rules.Skid(self.slideLength, laneRate, self.slideBack, self.slideAt)
+		if slid then
+			slideTo = self.slideWay * slid
+		else
+			self.slideAt = nil
+		end
+	end
+	-- (A slide is never faster than the lane change before it, so this keeps
+	-- to its curve exactly.)
+	local slide = Toward(self.slide, slideTo, step)
+	self.slide = slide
+
+	-- How far the wind has carried you: a lane by the end of a jump, slowly
+	-- at first (Rules.Blown), and never past the road's edge. Lane changes
+	-- still work in the air, on top of it. On the ground what's left of it
+	-- goes as fast as a lane change.
+	local want = 0
+	local rate = laneRate
+	if self.inAir then
+		self.airTime = self.airTime + h
+		if self:LandingLane() ~= self.lane then
+			want = self.blow * ns.Rules.Blown(tuning, self.airTime)
+		end
+		-- The fastest the wind's curve moves, so it's followed exactly, and
+		-- eased back along if a lane change leaves no lane to be blown to.
+		rate = 2 * laneWidth / ns.Rules.BlowTime(tuning)
+	end
+	local offset = Toward(self.offset, want, rate * h)
+	self.offset = offset
+	local x = math.max(lanes[1], math.min(lanes[#lanes], laneX + offset)) + slide
+	self.vx = (x - self.x) / h
+	self.x = x
 
 	if self.state == "crash" then
 		return nil

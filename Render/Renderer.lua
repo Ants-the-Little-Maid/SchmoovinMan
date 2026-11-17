@@ -98,6 +98,19 @@ local STEAM_COLOR = { 0.96, 0.98, 1 }
 -- across the road and over it, each a bright head with a fading tail.
 local WIND_STREAKS = 14
 local WIND_COLOR = { 1, 0.97, 0.88 }
+-- Ice (Winterspring's twist): ICE_GLINTS pale glints lying on the road at a
+-- slant (so they aren't taken for lane markings), fixed to it over every
+-- ICE_SPAN yards, some with a sparkle that comes and goes. Where the runner
+-- slides sideways on it, its hooves leave two scraped lines on the road
+-- (the last ICE_TRAIL points of them are kept, ICE_HOOF yards either side of
+-- where it was) and throw up a spray of ice on the side it's sliding to.
+local ICE_GLINTS = 24
+local ICE_SPAN = 100
+local ICE_GLINT = { 1, 1, 1 }
+local ICE_SCRAPE = { 0.36, 0.56, 0.82 }
+local ICE_SPRAY = { 0.93, 0.97, 1 }
+local ICE_TRAIL = 24
+local ICE_HOOF = 0.22
 local WISP_COLOR = { 0.5, 1, 0.75 }
 local WISP_CORE = { 1, 1, 1 }
 -- An escort (a zone's twist): seconds it takes to come up from behind the
@@ -176,18 +189,35 @@ end
 
 -- Distance from the fight camera to the boss's spot, ignoring the small
 -- sway with the runner's lane, so the fog it sets stays put through a fight.
-local function FightCameraToBoss()
+-- far: how many times further off the boss stands at this speed (Rules.Far).
+local function FightCameraToBoss(far)
 	local camera = FIGHT_CAMERA
 	local y = camera.lookAhead - camera.distance * math.cos(camera.pitch)
 	local z = camera.height + camera.distance * math.sin(camera.pitch)
-	return math.sqrt((ns.Tuning.boss.distance - y) ^ 2 + z * z)
+	return math.sqrt((ns.Tuning.boss.distance * far - y) ^ 2 + z * z)
 end
 local HALF_PI = math.pi / 2
 -- Seconds a charger runs before its running box is measured, so the game has
 -- switched its box to the run.
 local RUN_MEASURE_DELAY = 0.3
--- Where the runner sits on the wind rider: this share of its height up.
-local MOUNT_SEAT = 0.6
+-- Riding the wind rider. The wyvern's box is measured standing, and says
+-- little about where its back is in flight: with its box placed `seat` of
+-- its height under the runner, a screenshot (2026-11-15) showed its back
+-- about 1.9 yards below where the runner sits. So it's then raised `lift`
+-- yards, which puts its back just under the runner's seat. The runner sits
+-- `back` yards ahead of the wyvern's middle: in the author's reference
+-- picture of a wyvern and rider, the rider is at the wing roots, about a
+-- quarter of the way back from its nose, with the body, legs and tail
+-- behind. The camera looks at a spot `look` yards
+-- above the runner's feet (1.6 on the ground, so the wyvern under the runner
+-- is in view) and tilts `tilt` radians further down. /schmoove flight
+-- changes them for trying out.
+local FLIGHT = { seat = 0.45, lift = 2.2, back = 1.0, look = -0.5, tilt = 0 }
+Renderer.FLIGHT = FLIGHT
+-- The runner leans into a sideways move: LEAN radians for each yard a second
+-- (what it came to at 60 frames a second, when it went by frames), up to
+-- LEAN_MOST.
+local LEAN, LEAN_MOST = 0.025, 0.8
 
 -- Target sizes per role, in yards: height, lateral width, lift off the ground.
 -- Kept well inside a 2.6-yard lane and low enough to see the road past them.
@@ -255,6 +285,8 @@ function Renderer.Create(scene, ground)
 	self.sceneryDistance = 0
 	self.shots = {}
 	self.markers = { count = 0 }
+	self.iceTrail = { head = 0, size = 0 }
+	self.icePits = {}
 	self.ramps = {}
 	self.view = VIEWS.normal
 	return self
@@ -628,7 +660,7 @@ function Renderer:SyncEntities(world, zone, now)
 		end
 		-- A throw's landing mark doesn't wait for the hazard's model to load.
 		if entity.thrown and entity.phase == "flying" then
-			local _, progress = ns.Rules.ThrowPhase(ns.Tuning, entity.y, self.speed or 0, entity.throwMax)
+			local _, progress = ns.Rules.ThrowPhase(ns.Tuning, entity.y, self.speed or 0, entity.throwMax, self.far)
 			self:AddMarker(entity, entity.y, progress, far)
 		elseif hazardMarkers and entity.role ~= "tauren" and (not entity.thrown or entity.phase == "landed") then
 			self:AddHazardMarker(entity, far)
@@ -730,7 +762,7 @@ function Renderer:DrawEntity(record, entity, far, now)
 			return
 		elseif phase == "flying" then
 			landed = false
-			local _, progress = ns.Rules.ThrowPhase(ns.Tuning, y, self.speed or 0, entity.throwMax)
+			local _, progress = ns.Rules.ThrowPhase(ns.Tuning, y, self.speed or 0, entity.throwMax, self.far)
 			progress = math.max(record.throwProgress or 0, progress)
 			record.throwProgress = progress
 			if not record.launched then
@@ -1021,7 +1053,7 @@ function Renderer:AddWind(world, far)
 	if not direction then
 		return
 	end
-	local every = world:Twist().driftEvery
+	local every = world:Twist().blowEvery
 	local since = every - turnsIn
 	local strength = math.min(1, since / 0.6, turnsIn / 0.8)
 	if strength <= 0 then
@@ -1049,6 +1081,121 @@ function Renderer:AddWind(world, far)
 					math.max(from, to), y, z - thick, math.max(from, to), y, z + thick).level = 2
 			end
 		end
+	end
+end
+
+-- One piece of the lines the runner's hooves scrape on ice: from where it
+-- was (x1, y1) to where it went (x2, y2, further up the road).
+function Renderer:AddScrape(x1, y1, x2, y2)
+	for side = -1, 1, 2 do
+		local near, far = x1 + side * ICE_HOOF, x2 + side * ICE_HOOF
+		self:NextQuad(0.55, ICE_SCRAPE, far - 0.06, y2, 0.02, near - 0.06, y1, 0.02, near + 0.06, y1, 0.02, far + 0.06, y2, 0.02)
+	end
+end
+
+-- An icy road (see ICE_GLINTS). It's drawn before anything else on the
+-- road, so hazard markers, landing marks and pits lie over it, and a glint
+-- that would lie across a pit is left out (its sparkle would show over the
+-- hole). The glints and sparkles follow the run's distance and clock, so
+-- they hold still while paused. The scraped lines stay on the road where
+-- they were made, and are drawn until they've passed out of view, in
+-- whatever zone that is.
+function Renderer:AddIce(world, far)
+	local twist = world.Twist and world:Twist()
+	local icy = twist and twist.skid
+	local behind = self.view.behind
+	local distance = world.distance
+	if icy then
+		-- Where the pits are, rims and all: near edge, then far edge, of each.
+		local pits = self.icePits
+		local edges = 0
+		for _, entity in ipairs(world.entities) do
+			if entity.role == "pit" and entity.leave then
+				pits[edges + 1], pits[edges + 2] = entity.y - 0.35, (entity.leave - world.time) * world.speed + 0.35
+				edges = edges + 2
+			end
+		end
+		local half = RoadHalf() - 1.2
+		for index = 1, ICE_GLINTS do
+			-- Fixed numbers for each glint, from its index.
+			local a, b, c, d = (index * 0.6180339) % 1, (index * 0.4142136) % 1, (index * 0.7320508) % 1, (index * 0.3819660) % 1
+			local into = (b * ICE_SPAN - distance) % ICE_SPAN
+			local y = behind + into
+			local reach = 0.6 + 1.1 * c
+			local top, bottom = y + reach, y - reach
+			-- It comes out of the fog, or fades in at the far end of the span.
+			local fade = Fade(y, far) * math.min(1, (ICE_SPAN - into) / 10)
+			for edge = 1, edges, 2 do
+				if top > pits[edge] and bottom < pits[edge + 1] then
+					fade = 0
+				end
+			end
+			if fade > 0 then
+				local x = (a * 2 - 1) * half
+				local slant = (d - 0.5) * 1.4
+				self:NextQuad(0.5 * fade, ICE_GLINT, x + slant - 0.05, top, 0.01, x - slant - 0.05, bottom, 0.01,
+					x - slant + 0.05, bottom, 0.01, x + slant + 0.05, top, 0.01)
+				-- Every other one catches the light now and then, at its far end.
+				local twinkle = index % 2 == 0 and math.sin(world.time * 2.4 + index * 1.7) or 0
+				if twinkle > 0.2 then
+					local size, at = 0.35 * twinkle, x + slant
+					self:NextQuad(0.9 * twinkle * fade, ICE_GLINT, at - size, top, 2 * size, at - size, top, 0, at + size, top, 0, at + size, top, 2 * size).glow = true
+				end
+			end
+		end
+	end
+
+	-- Sliding: on the ice, between lanes or past the middle of one.
+	local state = world.runner
+	local trail = self.iceTrail
+	local x = state.x
+	local sliding = icy and state.z <= 0 and not state.flying and state.state ~= "crash"
+		and (state.laneX ~= ns.Tuning.lanes[state.lane] or state.slide ~= 0)
+	if sliding then
+		-- A new point of the lines once it has moved enough to show.
+		local last = trail.size > 0 and trail[trail.head]
+		if not self.iceSliding or not last or math.abs(x - last.x) >= 0.12 or distance - last.d >= 1.5 then
+			trail.head = trail.head % ICE_TRAIL + 1
+			trail.size = math.min(ICE_TRAIL, trail.size + 1)
+			local point = trail[trail.head]
+			if not point then
+				point = {}
+				trail[trail.head] = point
+			end
+			point.x, point.d, point.start = x, distance, not self.iceSliding
+		end
+		-- The spray, stronger the faster it's sliding: by its speed in the
+		-- game's own steps, so it's steady at any frame rate, and by the run's
+		-- clock, so it holds still while paused.
+		local speed = state.vx or 0
+		local strength = math.min(1, math.abs(speed) / 10)
+		if strength > 0.05 then
+			local way = speed > 0 and 1 or -1
+			for piece = 0, 2 do
+				local at = x + way * (0.35 + 0.3 * piece)
+				local wide = 0.22 + 0.08 * piece
+				local top = (0.75 - 0.2 * piece) * (0.8 + 0.2 * math.sin(world.time * 40 + piece * 2))
+				local puff = self:NextQuad(strength * (0.8 - 0.2 * piece), ICE_SPRAY, at - wide, 0, top, at - wide, 0, 0, at + wide, 0, 0, at + wide, 0, top)
+				puff.fade = true
+			end
+		end
+	end
+	self.iceSliding = sliding or nil
+
+	-- The lines, newest first, as far back as they're in view.
+	local newer = trail.size > 0 and trail[trail.head]
+	if sliding and newer then
+		self:AddScrape(newer.x, newer.d - distance, x, 0)
+	end
+	for back = 1, trail.size - 1 do
+		if newer.d - distance < behind then
+			break
+		end
+		local older = trail[(trail.head - back - 1) % ICE_TRAIL + 1]
+		if not newer.start then
+			self:AddScrape(older.x, math.max(behind, older.d - distance), newer.x, newer.d - distance)
+		end
+		newer = older
 	end
 end
 
@@ -1168,7 +1315,8 @@ function Renderer:DrawBoss(world, far, now)
 	end
 	local x = self.bossX + (targetX - self.bossX) * math.min(1, elapsed * 3)
 	self.bossX = x
-	local y = tuning.boss.distance
+	-- (Further off the faster you run, past boss.farSpeed: see Rules.Far.)
+	local y = tuning.boss.distance * (self.far or 1)
 	local yaw = -HALF_PI
 	local alpha = 1
 	local since = world.time - fight.start
@@ -1252,7 +1400,7 @@ function Renderer:DrawEscort(world, far, now)
 		record.actor:SetAlpha(0)
 		return
 	end
-	local distance = ns.Tuning.escort.distance
+	local distance = ns.Tuning.escort.distance * (self.far or 1)
 	local y, alpha = distance, 1
 	if record.leftAt then
 		local left = now - record.leftAt
@@ -1301,7 +1449,7 @@ function Renderer:UpdateFog(zone, fight)
 	if view.clearAhead then
 		lift = math.max(0, CameraToRoad(view.camera, view.clearAhead) - fog.near)
 	elseif fight > 0 then
-		lift = fight * math.max(0, FightCameraToBoss() - fog.near - BOSS_FOG * (fog.far - fog.near))
+		lift = fight * math.max(0, FightCameraToBoss(self.far or 1) - fog.near - BOSS_FOG * (fog.far - fog.near))
 	end
 	-- A sandstorm gust pulls it in.
 	lift = lift - (self.fogPull or 0)
@@ -1385,7 +1533,24 @@ function Renderer:UpdateMount(world)
 			mount.actor:SetAnimation(Assets.anims.windRiderFly[1], nil, 1)
 			mount.animated = true
 		end
+		if mount.ready then
+			-- Which model flew, for MountSize: kept after the flight.
+			self.flownKey, self.flownCandidate = mount.key, mount.candidate
+		end
 	end
+end
+
+-- The box of the wind rider last flown this session, as drawn: its height
+-- in yards and its scale (for /schmoove flight, to report back). Nil before
+-- the first flight.
+function Renderer:MountSize()
+	local key = self.flownKey
+	local box = key and self.bounds[key]
+	if not box then
+		return nil
+	end
+	local scale = self:Fit({ key = key, role = "windRider", candidate = self.flownCandidate })
+	return (box[6] - box[3]) * scale, scale
 end
 
 -- Takes the runner off the wind rider. The runner is never attached to it
@@ -1414,23 +1579,26 @@ function Renderer:DrawRunner(world, now)
 	end
 	local state = world.runner
 	local scale, zOffset = self:Fit(runner)
-	local lean = (state.x - (self.lastRunnerX or state.x)) * -1.5
-	self.lastRunnerX = state.x
+	-- It leans by its sideways speed in the game's own steps, not by how far
+	-- it moved since the last frame: that changes with the frame rate, and is
+	-- nothing on a frame with no step.
+	local lean = math.max(-LEAN_MOST, math.min(LEAN_MOST, (state.vx or 0) * -LEAN))
 	local speedFactor = math.max(0.8, math.min(2.2, world.speed / 11))
 
 	local mount = self.mount
 	if mount and mount.ready then
-		-- The wyvern flies under the runner, its body centred on the runner's
-		-- spot and its back MOUNT_SEAT of its height up, where the runner sits
-		-- in the riding pose, both facing up the road.
+		-- The wyvern flies under the runner, its body centred side to side on
+		-- the runner's spot, a little behind it, with its back where the runner
+		-- sits in the riding pose (see FLIGHT), both facing up the road.
 		local mountScale, mountZ, _, centerX, centerY = self:Fit(mount)
 		local box = self.bounds[mount.key]
-		local seat = (box[6] - box[3]) * mountScale * MOUNT_SEAT
+		local under = (box[6] - box[3]) * mountScale * FLIGHT.seat - FLIGHT.lift
 		-- The runner rides at its own height all the way up and down, so the
-		-- wyvern dips under the road for a moment at take-off and landing.
-		local mz = state.z - seat
-		self.scene:Place(mount.actor, state.x, 0, mz + mountZ, HALF_PI, mountScale, 0, lean, centerX, centerY)
-		mount.actor:SetAlpha(seat > 0 and math.max(0, math.min(1, state.z / seat)) or 1)
+		-- wyvern is under the road for a moment at take-off and landing: it
+		-- fades in over the first of the climb, and out over the last of the drop.
+		local mz = state.z - under
+		self.scene:Place(mount.actor, state.x, -FLIGHT.back, mz + mountZ, HALF_PI, mountScale, 0, lean, centerX, centerY)
+		mount.actor:SetAlpha(math.max(0, math.min(1, state.z / math.max(1, under))))
 		self:PlayRunner("mount")
 		self.scene:Place(runner.actor, state.x, 0, state.z + zOffset, HALF_PI, scale, 0, lean)
 		runner.actor:SetAlpha(1)
@@ -1675,10 +1843,10 @@ function Renderer:Reset(mode)
 	self.fogLift = 0
 	-- The camera starts each run in place, not still easing down from the
 	-- last run's flight or across from its lane.
-	self.camX, self.camZ, self.lastCameraAt = nil, nil, nil
+	self.camX, self.camZ, self.lastCameraAt, self.flightView = nil, nil, nil, nil
 	self.markers.count = 0
 	self.ground:DrawMarkers(self.markers)
-	self.lastRunnerX = nil
+	self.iceTrail.size, self.iceSliding = 0, nil
 	self:SetupRunner()
 end
 
@@ -1696,9 +1864,12 @@ function Renderer:Update(world, now)
 		self.scene:Calibrate()
 	end
 	local fight = self:UpdateFightView(now)
+	-- How many times further off a boss or a leader stands at this speed.
+	self.far = ns.Rules.Far(ns.Tuning, world.baseSpeed or 0)
 	-- A zone with sandstorm gusts (its twist): every gustEvery seconds one
 	-- blows for gustLength, easing in and out over a second, pulling the fog
-	-- in by gustPull of its range and hazing the view. It follows the run's
+	-- in by gustPull of its range (but leaving gustSee seconds of road in
+	-- sight, however fast you're going) and hazing the view. It follows the run's
 	-- clock, so it holds still while paused, and it dies down as the view
 	-- moves to a boss fight, where the fog must stay off the boss.
 	local twist = world.Twist and world:Twist()
@@ -1707,7 +1878,11 @@ function Renderer:Update(world, now)
 		local into = world.time % twist.gustEvery
 		gust = math.max(0, math.min(1, into, twist.gustLength - into)) * (1 - fight)
 	end
-	self.fogPull = gust * (twist and twist.gustPull or 0) * zone.fog.far
+	local pull = gust * (twist and twist.gustPull or 0) * zone.fog.far
+	if twist and twist.gustSee then
+		pull = math.max(0, math.min(pull, zone.fog.far - twist.gustSee * world.speed))
+	end
+	self.fogPull = pull
 	self.ground:SetHaze(zone.fog.color, gust * 0.4)
 	local base = self.view.camera
 	-- Camera eases toward the runner's lane and rises in flight. The shares
@@ -1718,16 +1893,22 @@ function Renderer:Update(world, now)
 	local easeX, easeZ = 1 - 0.88 ^ frames, 1 - 0.92 ^ frames
 	local camX = (self.camX or 0) + (state.x * 0.55 - (self.camX or 0)) * easeX
 	local baseZ = CameraSetting("height", fight, base)
-	local camZ = (self.camZ or baseZ) + ((state.flying and state.z + 1.5 or baseZ + state.z * 0.3) - (self.camZ or baseZ)) * easeZ
+	local camZ = (self.camZ or baseZ) + ((state.flying and state.z + FLIGHT.look or baseZ + state.z * 0.3) - (self.camZ or baseZ)) * easeZ
 	self.camX, self.camZ = camX, camZ
+	-- In flight it also tilts down by FLIGHT.tilt, easing over as it rises.
+	local flightView = (self.flightView or 0) + ((state.flying and 1 or 0) - (self.flightView or 0)) * easeZ
+	self.flightView = flightView
 	self.scene:SetFieldOfView(CameraSetting("fov", fight, base))
-	self.scene:LookAt(camX, CameraSetting("lookAhead", fight, base), camZ, CameraSetting("distance", fight, base), CameraSetting("pitch", fight, base))
+	self.scene:LookAt(camX, CameraSetting("lookAhead", fight, base), camZ, CameraSetting("distance", fight, base),
+		CameraSetting("pitch", fight, base) + FLIGHT.tilt * flightView)
 
 	self:UpdateMount(world)
 	self:DrawRunner(world, now)
 	self.speed = world.speed
 	self.taurenSpeed = world.taurenSpeed
 	self.markers.count = 0
+	-- The ice first: it's the road's surface, and everything else lies over it.
+	self:AddIce(world, zone.fog.far + 5 - (self.fogPull or 0))
 	self:DrawBoss(world, zone.fog.far + 5, now)
 	self:DrawEscort(world, zone.fog.far + 5, now)
 	self:UpdateFog(zone, fight)

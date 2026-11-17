@@ -238,9 +238,10 @@ local function NextLane(states, startState, now)
 		state = state.parent
 	end
 	for _, step in ipairs(path) do
-		-- A row is only behind us once it has fully passed the runner.
+		-- A row is only behind us once it has fully passed the runner. (In a
+		-- crosswind a jump lands a lane over: `at` is the lane to be in for it.)
 		if step.t > now - 0.1 then
-			return step.lane
+			return step.at or step.lane
 		end
 	end
 	return path[#path] and path[#path].lane
@@ -260,7 +261,13 @@ local function PlayBot(seed, tuning, seconds, mode, zones)
 	local planTimer = 0
 	while world.time < seconds and not world.over do
 		planTimer = planTimer - tuning.step
-		if planTimer <= 0 and not runner.flying then
+		-- In a crosswind, a jump under way is left to the wind until what was
+		-- jumped is behind: steering sooner would swing across that row. The
+		-- plan is made afresh the moment it is.
+		local held = runner.blow ~= nil and runner.z > 0 and lastJump > world.time - 0.1
+		if held then
+			planTimer = 0
+		elseif planTimer <= 0 and not runner.flying then
 			planTimer = 0.02
 			local items = {}
 			local spear
@@ -282,14 +289,15 @@ local function PlayBot(seed, tuning, seconds, mode, zones)
 					code = entity.lane ~= runner.lane and "B" or nil
 				end
 				if code and not entity.smashed and entity.arrive > world.time - 0.1 then
-					items[#items + 1] = { t = entity.arrive, lane = entity.lane, code = code }
+					items[#items + 1] = { t = entity.arrive, lane = entity.lane, code = code, wind = code == "L" and entity.wind or nil }
 				end
 				if entity.role == "spear" and entity.arrive > world.time + 0.05 and (not spear or entity.arrive < spear.arrive) then
 					spear = entity
 				end
 			end
 			SortByTime(items)
-			local start = { lane = runner.lane, t = world.time - Patterns.LIMITS.reaction, jump = lastJump, duck = lastDuck }
+			-- (In the air in a crosswind, the lane it's being carried to.)
+			local start = { lane = runner:LandingLane(), t = world.time - Patterns.LIMITS.reaction, jump = lastJump, duck = lastDuck }
 			-- Go for the next spear if a safe path takes it: plan as if the other
 			-- lanes were blocked when it arrives.
 			local planned = false
@@ -318,9 +326,12 @@ local function PlayBot(seed, tuning, seconds, mode, zones)
 			end
 		end
 
-		if runner.lane < target then
+		local heading = runner:LandingLane()
+		if held then
+			-- Nothing pressed.
+		elseif heading < target then
 			world:Input("right")
-		elseif runner.lane > target then
+		elseif heading > target then
 			world:Input("left")
 		end
 
@@ -334,7 +345,9 @@ local function PlayBot(seed, tuning, seconds, mode, zones)
 				if code == "L" and untilArrive <= 0.36 and runner.z == 0 and not runner.flying then
 					world:Input("jump")
 					lastJump = entity.arrive
-				elseif code == "H" and untilArrive <= 0.25 and runner.state ~= "duck" and not runner.flying then
+				-- (Ducking again if the duck under way would end before this bar is
+				-- past: a duck pressed again lasts duckTime from then.)
+				elseif code == "H" and untilArrive <= 0.25 and (runner.state ~= "duck" or runner.duckLeft < untilArrive + 0.1) and not runner.flying then
 					world:Input("duck")
 					lastDuck = entity.arrive
 				end
@@ -616,7 +629,9 @@ do
 	local landsEarly = true
 	for speed = Tuning.baseSpeed, Tuning.maxSpeed do
 		-- 0.9 s away: on the road already, and thrown from no nearer than 1.5 s.
-		if Rules.ThrowPhase(Tuning, speed * 0.9, speed) ~= "landed" or Rules.ThrowPhase(Tuning, speed * 1.5, speed) == "landed" then
+		-- (Past farSpeed the boss stands further off, so this still holds.)
+		local far = Rules.Far(Tuning, speed)
+		if Rules.ThrowPhase(Tuning, speed * 0.9, speed, nil, far) ~= "landed" or Rules.ThrowPhase(Tuning, speed * 1.5, speed, nil, far) == "landed" then
 			landsEarly = false
 		end
 	end
@@ -1201,18 +1216,288 @@ do
 	local windy = World.New(3, copy(Tuning), { bosses = false, zones = { "thousandneedles", "mulgore" } })
 	windy.time = 0.5
 	local first, firstLeft = windy:Wind()
-	windy.time = wind.driftEvery + 0.5
+	windy.time = wind.blowEvery + 0.5
 	local second = windy:Wind()
 	windy:ApplyTwist()
-	check("the crosswind blows one way, then turns round, and the runner drifts with it",
-		first == 1 and near(firstLeft, wind.driftEvery - 0.5, 1e-9) and second == -1 and windy.runner.drift == -wind.drift)
+	check("the crosswind blows one way, then turns round, and the runner feels it",
+		first == 1 and near(firstLeft, wind.blowEvery - 0.5, 1e-9) and second == -1 and windy.runner.wind == -1)
 	check("no wind elsewhere", World.New(3, copy(Tuning), { bosses = false }):Wind() == nil)
-	local widest = 0
-	for _, shape in pairs(Rules.SHAPES) do
-		widest = math.max(widest, shape.halfWidth)
+
+	-- In the air the crosswind carries you one lane over.
+	local lanes = Tuning.lanes
+	local laneWidth = lanes[2] - lanes[1]
+	-- An empty road in Thousand Needles at run time `at`, the runner in `lane`.
+	local function Windy(at, lane)
+		local world = World.New(3, copy(Tuning), { bosses = false, zones = { "thousandneedles", "mulgore" } })
+		world.cursor = 1e9
+		world.time = at
+		world:Step(Tuning.step)
+		local runner = world.runner
+		runner.lane, runner.laneX, runner.x = lane, lanes[lane], lanes[lane]
+		return world, runner
 	end
-	check("a crosswind can't push you into the next lane's hazard",
-		(Tuning.lanes[2] - Tuning.lanes[1]) - wind.drift > widest + Tuning.runnerHalfWidth)
+	-- Steps until the runner is back on the ground and settled; returns how
+	-- far out it got, and where it was at the top of the jump.
+	local function Land(world, during)
+		local runner = world.runner
+		local least, most, top = runner.x, runner.x, nil
+		for step = 1, 400 do
+			if during then
+				during(step)
+			end
+			local rising = runner.vz > 0
+			world:Step(Tuning.step)
+			if rising and runner.vz <= 0 and not top then
+				top = runner.x
+			end
+			least, most = math.min(least, runner.x), math.max(most, runner.x)
+			if step > 5 and runner.z == 0 and not runner.inAir and runner.offset == 0 and runner.laneX == lanes[runner.lane] then
+				break
+			end
+		end
+		return least, most, top
+	end
+	do
+		local world, runner = Windy(1, 2)
+		world:Input("jump")
+		local least, most, top = Land(world)
+		check("a jump in a wind blowing right lands one lane to the right", runner.lane == 3 and near(runner.x, lanes[3]), runner.lane)
+		check("it's still over what it jumped at the top of the jump", top and top - lanes[2] < 0.3 * laneWidth and top > lanes[2], top)
+		check("and never leaves the road", least >= lanes[1] and most <= lanes[3] + 1e-9)
+	end
+	do
+		local world, runner = Windy(wind.blowEvery + 1, 2)
+		world:Input("jump")
+		Land(world)
+		check("a jump in a wind blowing left lands one lane to the left", runner.lane == 1 and near(runner.x, lanes[1]), runner.lane)
+	end
+	do
+		local world, runner = Windy(1, 3)
+		world:Input("jump")
+		local _, most = Land(world)
+		check("at the road's edge the wind has nowhere to carry you", runner.lane == 3 and near(most, lanes[3]), most)
+	end
+	do
+		local world, runner = Windy(1, 2)
+		world:Input("jump")
+		Land(world, function(step)
+			if step == 10 then
+				world:Input("left")
+			end
+		end)
+		check("changing lane against the wind in the air brings you down where you were", runner.lane == 2 and near(runner.x, lanes[2]), runner.lane)
+	end
+	do
+		local world, runner = Windy(1, 2)
+		world:Input("jump")
+		Land(world, function(step)
+			if step == 10 then
+				world:Input("duck")
+			end
+		end)
+		check("a jump cut short doesn't get half way, and comes back to its lane", runner.lane == 2 and near(runner.x, lanes[2]), runner.lane)
+	end
+	do
+		-- Taking off 0.2 s before the wind turns: carried the old way all the way.
+		local world, runner = Windy(wind.blowEvery - 0.2, 2)
+		world:Input("jump")
+		Land(world)
+		check("the wind that carries a jump is the one it took off in", world:Wind() == -1 and runner.lane == 3, runner.lane)
+	end
+	do
+		local world, runner = Windy(1, 1)
+		runner:Launch(1.6, Tuning.pit.height)
+		local _, most = Land(world)
+		check("a ramp's throw is carried one lane, and no further", runner.lane == 2 and near(most, lanes[2]), most)
+	end
+	do
+		local world, runner = Windy(1, 2)
+		runner:SetFlying(true)
+		for _ = 1, 120 do
+			world:Step(Tuning.step)
+		end
+		check("on a Wind Rider the wind doesn't carry you", runner.lane == 2 and runner.x == lanes[2] and runner.z > 4)
+		runner:SetFlying(false)
+		Land(world)
+		check("but it does on the drop afterwards", runner.lane == 3, runner.lane)
+	end
+	check("the wind carries you a whole lane over an ordinary jump, a quarter of it by the top",
+		near(Rules.Blown(Tuning, Rules.BlowTime(Tuning)), laneWidth) and near(Rules.Blown(Tuning, Rules.BlowTime(Tuning) / 2), laneWidth / 4)
+			and near(Rules.Blown(Tuning, 5), laneWidth))
+	local function Named(name)
+		for _, pattern in ipairs(Patterns.LIST) do
+			if pattern.name == name then
+				return pattern
+			end
+		end
+	end
+	do
+		-- A ramp's coins lie along the blown flight, from the moment the ramp is
+		-- touched: riding it passes right through each one and takes them all,
+		-- even at the Slow starting speed, where the ramp is touched earliest.
+		local pit = Named("pitOneRamp")
+		local pick = Patterns.Pick
+		Patterns.Pick = function()
+			return pit, false
+		end
+		local slow = copy(Tuning)
+		slow.baseSpeed = Tuning.startSpeeds[1].speed
+		local world = World.New(3, slow, { bosses = false, zones = { "thousandneedles", "thousandneedles" } })
+		world:Step(slow.step)
+		Patterns.Pick = pick
+		world.cursor = 1e9
+		-- The first pit only.
+		local ramp
+		for _, entity in ipairs(world.entities) do
+			if entity.role == "ramp" and (not ramp or entity.arrive < ramp.arrive) then
+				ramp = entity
+			end
+		end
+		local kept, coins = {}, {}
+		for _, entity in ipairs(world.entities) do
+			if entity.arrive <= ramp.leave then
+				kept[#kept + 1] = entity
+				if entity.role == "coin" then
+					coins[#coins + 1] = entity
+				end
+			end
+		end
+		world.entities = kept
+		local runner = world.runner
+		runner.lane, runner.laneX, runner.x = ramp.lane, lanes[ramp.lane], lanes[ramp.lane]
+		-- How far to the side of each coin the runner is as it arrives.
+		local off, passed = 0, {}
+		while not world.over and world.time < ramp.leave + 1 do
+			world:Step(slow.step)
+			for _, coin in ipairs(coins) do
+				if not passed[coin] and world.time >= coin.arrive then
+					passed[coin] = true
+					off = math.max(off, math.abs(coin.x - runner.x))
+				end
+			end
+		end
+		check("a ramp's coins lie along the blown flight, and riding it takes them all",
+			#coins > 2 and world.tokens == #coins and off < 0.25 and not world.over and runner.lane == ramp.lane + 1,
+			("%d of %d coins, %.2f yards off, lane %d"):format(world.tokens, #coins, off, runner.lane))
+	end
+	do
+		-- Logs right across, due just as the wind turns: only used if they can
+		-- be put off until it has settled and still be over in the room given.
+		local world = World.New(3, copy(Tuning), { bosses = false, zones = { "thousandneedles", "mulgore" } })
+		local logs = Named("logJump")
+		local duration = Patterns.Duration(logs, 1)
+		local function None()
+			return nil
+		end
+		world.cursor = wind.blowEvery
+		check("a chunk isn't put off for the wind past the room it has",
+			world:PickForWind(1, 1, logs, false, None, nil, duration + 0.5) == nil and world.cursor == wind.blowEvery, world.cursor)
+		check("with room for it, it's put off until the wind has settled",
+			world:PickForWind(1, 1, logs, false, None, nil, duration + 0.7) == logs and near(world.cursor, wind.blowEvery + 0.7), world.cursor)
+		world.cursor = wind.blowEvery
+		check("nor is a ramp laid just after the wind turns", not world:WindFits({ { t = 0, lane = 1, code = "R" } }, world.cursor, 1)
+			and world:WindFits({ { t = 0, lane = 1, code = "R" } }, world.cursor + wind.blowQuiet, 1))
+	end
+
+	-- The fairness check knows a jump in the wind lands a lane over.
+	do
+		local function Way(codes, direction)
+			local items = {}
+			for lane = 1, 3 do
+				local code = codes:sub(lane, lane)
+				if code ~= "." then
+					items[#items + 1] = { t = 5, lane = lane, code = code, wind = code == "L" and direction or nil }
+				end
+			end
+			return Patterns.Feasible(items, Tuning)
+		end
+		local ok, states = Way("LBB", -1)
+		check("a jump at the road's edge, blown outward, lands where it was", ok and #states == 1 and states[1].lane == 1 and states[1].at == 1)
+		check("a jump blown into a block is no way through", not Way("LBB", 1))
+		ok, states = Way("LLB", 1)
+		check("a jump blown over another thing to jump lands in its lane", ok and #states == 1 and states[1].lane == 2 and states[1].at == 1)
+		check("a jump with a block either side is no way through in any wind", not Way("BLB", 1) and not Way("BLB", -1))
+		ok, states = Way("BLB", nil)
+		check("without wind it still is", ok and states[1].lane == 2)
+		-- With no time to get to another lane, from lane 1:
+		local function From(direction)
+			local items = {
+				{ t = 5, lane = 1, code = "L", wind = direction },
+				{ t = 5, lane = 2, code = "H" },
+			}
+			return (Patterns.Feasible(items, Tuning, { { lane = 1, t = 4.9, jump = -1000, duck = -1000 } }))
+		end
+		check("a jump blown under a high bar is no way through", not From(1) and From(-1))
+		-- For a moment after a blown jump it's still over the lane it left.
+		local function Then(after, direction)
+			local items = {
+				{ t = 5, lane = 1, code = "L", wind = direction },
+				{ t = 5 + after, lane = 1, code = "B" },
+			}
+			return (Patterns.Feasible(items, Tuning, { { lane = 1, t = 4.9, jump = -1000, duck = -1000 } }))
+		end
+		check("a block in the lane just jumped from, too soon after, is no way through in the wind", not Then(0.3, 1) and Then(0.3, nil))
+		check("but it is once the wind has carried the jump clear", Then(Patterns.LIMITS.blowClear, 1))
+		-- Two jumps that come down in the same lane, one blown there and one
+		-- not: the one that wasn't blown is kept, as it isn't over the lane
+		-- the other left.
+		local both = {
+			{ t = 5, lane = 2, code = "L", wind = 1 },
+			{ t = 5, lane = 3, code = "L", wind = 1 },
+			{ t = 5.3, lane = 2, code = "B" },
+		}
+		check("of two jumps that land in one lane, the one not blown there is kept",
+			(Patterns.Feasible(both, Tuning, { { lane = 2, t = 4.9, jump = -1000, duck = -1000 }, { lane = 3, t = 4.9, jump = -1000, duck = -1000 } })))
+		-- How long that can be: a jump taken at the last moment (just high
+		-- enough as the log reaches it) is carried clear of whatever stands in
+		-- its lane this long after the log's row, at the slowest speed.
+		local low = Rules.SHAPES.low
+		local rise = (Tuning.jumpSpeed - math.sqrt(Tuning.jumpSpeed ^ 2 - 2 * Tuning.gravity * low.top)) / Tuning.gravity
+		local need = 0
+		for role, shape in pairs(Rules.SHAPES) do
+			if Rules.OBSTACLE[role] and role ~= "low" then
+				local clear = Rules.BlowTime(Tuning) * math.sqrt((shape.halfWidth + Tuning.runnerHalfWidth) / laneWidth)
+				need = math.max(need, clear - rise + (shape.halfDepth - low.halfDepth) / Tuning.startSpeeds[1].speed)
+			end
+		end
+		check("a blown jump's own lane is checked for as long as it can still be over it", Patterns.LIMITS.blowClear >= need, need)
+	end
+
+	-- Thousand Needles, run after run of it: nothing to jump arrives just after
+	-- the wind turns, every chunk can be passed blown about, and it isn't all
+	-- coins: there's still plenty to jump.
+	for seed = 1, 3 do
+		local world = World.New(seed, copy(Tuning), { bosses = seed == 3, recordTimeline = true, zones = { "thousandneedles", "thousandneedles" } })
+		while world.time < 240 do
+			world.safeLeft = 1e9
+			world:Step(0.1)
+			world:DrainEvents()
+		end
+		local jumps, early, unmarked = 0, 0, 0
+		for _, record in ipairs(world.timeline) do
+			if record.code == "R" and record.t % wind.blowEvery < wind.blowQuiet - 1e-9 then
+				early = early + 1
+			end
+			if Patterns.REQUIREMENT[record.code] == "jump" then
+				jumps = jumps + 1
+				if record.t % wind.blowEvery < wind.blowQuiet - 1e-9 then
+					early = early + 1
+				end
+				if record.wind ~= (math.floor(record.t / wind.blowEvery) % 2 == 0 and 1 or -1) then
+					unmarked = unmarked + 1
+				end
+			end
+		end
+		table.sort(world.timeline, function(a, b)
+			return a.t < b.t
+		end)
+		check(("crosswind seed %d: nothing to jump, and no ramp, arrives just after a turn"):format(seed), early == 0, early)
+		check(("crosswind seed %d: each thing to jump knows its wind"):format(seed), unmarked == 0, unmarked)
+		check(("crosswind seed %d: still plenty to jump"):format(seed), jumps > 40, jumps)
+		check(("crosswind seed %d: every chunk can be passed"):format(seed), (Patterns.Feasible(world.timeline, Tuning)))
+	end
+	check("no jump is laid for a wind you might not take off in",
+		wind.blowQuiet >= 0.586 + (Rules.SHAPES.low.halfDepth + Tuning.runnerHalfDepth) / Tuning.maxSpeed)
 	-- Lava vents turn up, each with clear road either side: time to step out
 	-- of its lane before it, and to cross the whole road after it.
 	local vented = World.New(11, copy(Tuning), { bosses = false, recordTimeline = true, zones = { "mulgore", "burningsteppes" } })
@@ -1243,6 +1528,180 @@ do
 	local icy = World.New(9, copy(Tuning), { bosses = false, zones = { "winterspring", "mulgore" } })
 	icy:Step(0.1)
 	check("ice slows lane changes in its zone", icy.runner.laneChangeTime == ice.laneChange and icy:Twist() == icy.tuning.twists.winterspring)
+
+	-- The skid: arriving in a lane on the ice, the runner slides past its
+	-- middle and comes back.
+	local plain = World.New(9, copy(Tuning), { bosses = false, zones = { "mulgore", "mulgore" } })
+	plain:Step(0.1)
+	check("ice makes lane changes skid in its zone, and only there",
+		icy.runner.skid == ice.skid and icy.runner.skidBack == ice.skidBack and plain.runner.skid == nil)
+	local lanes = Tuning.lanes
+	local laneWidth = lanes[2] - lanes[1]
+	local h = Tuning.step
+	local rate = laneWidth / ice.laneChange
+	local out = 2 * ice.skid / rate
+	-- Its curve: out to its length, no faster than the lane change that led
+	-- to it, and back.
+	local most = 0
+	for step = 0, math.floor((out + ice.skidBack) / h) do
+		most = math.max(most, Rules.Skid(ice.skid, rate, ice.skidBack, step * h) or 0)
+	end
+	check("a skid goes out to its length and no further, then comes back",
+		Rules.Skid(ice.skid, rate, ice.skidBack, 0) == 0 and near(Rules.Skid(ice.skid, rate, ice.skidBack, out), ice.skid, 1e-9)
+			and most <= ice.skid + 1e-9 and Rules.Skid(ice.skid, rate, ice.skidBack, out + ice.skidBack + 1e-9) == nil, most)
+	check("a skid starts no faster than the lane change before it", Rules.Skid(ice.skid, rate, ice.skidBack, h) <= rate * h + 1e-9)
+	-- At its furthest it's still in reach of everything in its own lane, out
+	-- of reach of everything in the next, and on the road: it changes how a
+	-- lane change looks, not what's hit or picked up.
+	local at = lanes[2] + ice.skid
+	local same = Rules.Touches(lanes[2], 0, 0.5, at, 0, Tuning.runnerHeight) and not Rules.Touches(lanes[3], 0, 0.5, at, 0, Tuning.runnerHeight)
+	for role, shape in pairs(Rules.SHAPES) do
+		local reach = shape.halfWidth + Tuning.runnerHalfWidth
+		same = same and ice.skid < reach and lanes[3] - at >= reach
+		if Rules.OBSTACLE[role] then
+			same = same and Rules.HitsObstacle(Tuning, role, lanes[2], 0, at, 0, Tuning.runnerHeight)
+				and not Rules.HitsObstacle(Tuning, role, lanes[3], 0, at, 0, Tuning.runnerHeight)
+		end
+	end
+	check("a skid reaches nothing in the next lane and leaves nothing in its own", same)
+	check("a skid from an outside lane stays on the road", lanes[#lanes] + ice.skid + Tuning.runnerHalfWidth <= laneWidth * 1.5)
+
+	local function Icy(skid)
+		local runner = ns.Runner.New(Tuning)
+		runner.laneChangeTime = ice.laneChange
+		if skid then
+			runner.skid, runner.skidBack = ice.skid, ice.skidBack
+		end
+		return runner
+	end
+	-- One lane change on the ground.
+	local runner = Icy(true)
+	runner:Input("right")
+	local arrived, furthestAt, settled
+	local furthest = 0
+	for step = 1, 240 do
+		runner:Update(h)
+		local past = runner.x - lanes[3]
+		if not arrived and past >= -1e-9 then
+			arrived = step * h
+		end
+		if past > furthest then
+			furthest, furthestAt = past, step * h
+		end
+		if arrived and not settled and past == 0 and runner.slide == 0 and step * h > arrived + h then
+			settled = step * h
+		end
+	end
+	check("on ice a lane change reaches the lane as soon as ever, then skids past it",
+		arrived and furthestAt and near(arrived, ice.laneChange, h) and near(furthest, ice.skid, 0.01) and near(furthestAt, ice.laneChange + out, 2 * h),
+		("%.3f s, %.3f yd at %.3f s"):format(arrived or -1, furthest, furthestAt or -1))
+	check("and comes back to the middle of the lane",
+		settled and near(settled, ice.laneChange + out + ice.skidBack, 3 * h) and runner.x == lanes[3] and runner.slideAt == nil, settled)
+	-- One that ends in the air doesn't skid, nor one off the ice.
+	local function Past(runner, jump)
+		if jump then
+			runner:Input("jump")
+			runner:Update(h)
+		end
+		runner:Input("right")
+		local past = 0
+		for _ = 1, 240 do
+			runner:Update(h)
+			past = math.max(past, runner.x - lanes[3])
+		end
+		return past
+	end
+	check("a lane change that ends in the air doesn't skid", Past(Icy(true), true) == 0)
+	check("nor does one off the ice", Past(Icy(false)) == 0)
+
+	-- Turned back at once, it's only a wobble: the skid is as much of the
+	-- whole as the lane change ran of a lane.
+	local turned = Icy(true)
+	turned:Input("right")
+	turned:Update(h)
+	turned:Update(h)
+	turned:Input("left")
+	local wobble = 0
+	for _ = 1, 240 do
+		turned:Update(h)
+		wobble = math.max(wobble, lanes[2] - turned.x)
+	end
+	check("a lane change turned back at once skids only as far as it ran",
+		wobble > 0 and wobble < ice.skid * 3 * rate * h / laneWidth and turned.x == lanes[2] and turned.slide == 0, wobble)
+	-- A twist that gives a skid and no time to come back in still works:
+	-- it's over as soon as it's out.
+	local bare = Icy(false)
+	bare.skid = ice.skid
+	check("a skid with no time to come back in comes straight back",
+		Rules.Skid(ice.skid, rate, nil, out + h) == nil and Past(bare) > 0 and bare.x == lanes[3] and bare.slide == 0)
+	-- The runner's sideways speed, which its lean and the spray are drawn by.
+	local mover = Icy(true)
+	mover:Input("right")
+	mover:Update(h)
+	mover:Update(h)
+	local moving = mover.vx
+	for _ = 1, 240 do
+		mover:Update(h)
+	end
+	check("the runner knows its sideways speed", near(moving, rate, 1e-6) and mover.vx == 0, moving)
+
+	-- In a real run: at the skid's furthest, a coin in your lane is still
+	-- taken and a wall in the next lane still missed.
+	local slid = World.New(9, copy(Tuning), { bosses = false, zones = { "winterspring", "winterspring" } })
+	slid:Step(0.1)
+	slid.entities = {}
+	slid.cursor = 1e9
+	slid.safeLeft = 0
+	local slider = slid.runner
+	slider.lane, slider.laneX, slider.x = 1, lanes[1], lanes[1]
+	slid:Step(0.1)
+	local peak = slid.time + ice.laneChange + out
+	slid:AddEntity("coin", 2, peak, 0.9)
+	slid:AddEntity("wall", 3, peak, 0)
+	slid:Input("right")
+	local reached = 0
+	while slid.time < peak + 0.5 and not slid.over do
+		slid:Step(h)
+		reached = math.max(reached, slider.x - lanes[2])
+	end
+	check("skidding past a lane still takes its coin and misses the next lane's wall",
+		not slid.over and slid.tokens == 1 and near(reached, ice.skid, 0.01), ("%d tokens, %.2f yd"):format(slid.tokens, reached))
+
+	-- The same keys with and without the skid: the lane change itself is
+	-- the same, and the two are only ever apart within the skid's length of
+	-- the middle of one lane, where what's hit and picked up is the same.
+	-- (The game's own generator, which gives the same numbers on Lua 5.1 and 5.3.)
+	local keys = ns.Random.New(246353)
+	local function Chance()
+		return keys:Next()
+	end
+	local apart, off, differ = 0, 0, 0
+	for _ = 1, 120 do
+		local with, without = Icy(true), Icy(false)
+		for _ = 1, 600 do
+			local roll = Chance()
+			local key = roll < 0.015 and "left" or roll < 0.03 and "right" or roll < 0.034 and "jump" or nil
+			if key then
+				with:Input(key)
+				without:Input(key)
+			end
+			with:Update(h)
+			without:Update(h)
+			if with.laneX ~= without.laneX or with.lane ~= without.lane or with.z ~= without.z then
+				differ = differ + 1
+			end
+			if with.x ~= without.x then
+				apart = apart + 1
+				local from = math.huge
+				for _, x in ipairs(lanes) do
+					from = math.min(from, math.max(math.abs(with.x - x), math.abs(without.x - x)))
+				end
+				off = math.max(off, from)
+			end
+		end
+	end
+	check("with the same keys, a skidding runner is only ever apart from a plain one near the middle of a lane",
+		apart > 1000 and differ == 0 and off <= ice.skid + 1e-9, ("%d steps apart, %.3f yd off"):format(apart, off))
 end
 
 -- The other zones' twists --------------------------------------------------------
@@ -1467,7 +1926,9 @@ do
 	local soon = true
 	for speed = Tuning.baseSpeed, Tuning.maxSpeed do
 		local from = Tuning.escort.distance - 2
-		if Rules.ThrowPhase(Tuning, speed * 0.4, speed, from) ~= "landed" or Rules.ThrowPhase(Tuning, from + 1, speed, from) ~= "waiting" then
+		-- (Past farSpeed the escort runs further ahead, as a boss stands further off.)
+		local far = Rules.Far(Tuning, speed)
+		if Rules.ThrowPhase(Tuning, speed * 0.4, speed, from, far) ~= "landed" or Rules.ThrowPhase(Tuning, from * far + 1, speed, from, far) ~= "waiting" then
 			soon = false
 		end
 	end
@@ -1538,6 +1999,311 @@ do
 	for _, key in ipairs({ "barrens", "moonglade", "ironforge", "thunderbluff" }) do
 		local world = PlayBot(17, copy(Tuning), 110, nil, { "mulgore", key })
 		check("bot survives " .. key, not world.over, ("crashed into %s at %.1fs in zone %d"):format(tostring(world.crashRole), world.time, world.zoneIndex))
+	end
+	-- And through Thousand Needles, zone after zone of it, blown a lane over
+	-- by the crosswind on every jump, with its boss throwing into the wind too.
+	for seed = 21, 23 do
+		local world = PlayBot(seed, copy(Tuning), 150, nil, { "thousandneedles", "thousandneedles" })
+		check(("bot survives the crosswind, seed %d"):format(seed), not world.over,
+			("crashed into %s at %.1fs in zone %d"):format(tostring(world.crashRole), world.time, world.zoneIndex))
+		if seed == 21 then
+			check("the bot jumps in the crosswind, and meets its boss", world.jumps > 5 and world.bossesDriven + world.bossesSurvived > 0,
+				("%d jumps, %d bosses"):format(world.jumps, world.bossesDriven + world.bossesSurvived))
+		end
+	end
+end
+
+-- Late zones: a higher top speed, layouts that unlock from zone 6 to 12, easy
+-- layouts turning rare, and stragglers in the gaps.
+do
+	local top = Tuning.maxSpeed
+	local boss = Tuning.boss
+	check("the speed is still rising in zone 13", Rules.Speed(Tuning, 12 * L + Tuning.bumpTime) < top, Rules.Speed(Tuning, 12 * L + Tuning.bumpTime))
+	check("and is capped in the end", Rules.Speed(Tuning, 40 * L) == top)
+	check("an orc run's Tauren top out where they always did",
+		Tuning.orcRun.maxSpeed == 38 and Rules.TaurenSpeed(Tuning, 40 * L) == Tuning.orcRun.maxSpeed + Tuning.orcRun.taurenLead, Rules.TaurenSpeed(Tuning, 40 * L))
+
+	-- Past farSpeed a boss stands further off, in step with your speed, so a
+	-- throw leaves its hand and lands as long before it reaches you.
+	check("a boss stands no further off up to farSpeed, then in step with your speed",
+		top > boss.farSpeed and Rules.Far(Tuning, Tuning.baseSpeed) == 1 and Rules.Far(Tuning, boss.farSpeed) == 1 and near(Rules.Far(Tuning, top), top / boss.farSpeed))
+	local function Warning(speed)
+		local far = Rules.Far(Tuning, speed)
+		local thrown, landed
+		for step = 300, 0, -1 do
+			local t = step / 100
+			local phase = Rules.ThrowPhase(Tuning, speed * t, speed, nil, far)
+			thrown = thrown or (phase ~= "waiting" and t)
+			landed = landed or (phase == "landed" and t)
+		end
+		return thrown, landed
+	end
+	local thrownAt, landedAt = Warning(boss.farSpeed)
+	local thrownTop, landedTop = Warning(top)
+	check("at the top speed a throw leaves and lands as long before it reaches you as at farSpeed",
+		near(thrownTop, thrownAt, 0.011) and near(landedTop, landedAt, 0.011) and landedTop >= 0.9,
+		("%.2f and %.2f s, not %.2f and %.2f"):format(thrownTop, landedTop, thrownAt, landedAt))
+	local topTuning = copy(Tuning)
+	topTuning.baseSpeed, topTuning.tempoStart, topTuning.gapStart = top, Tuning.tempoMin, Tuning.gapMin
+	do
+		local world = World.New(3, copy(topTuning), { bosses = false, zones = { "mulgore", "mulgore" } })
+		world:Step(Tuning.step)
+		world.cursor = 1e9
+		local hazard = world:AddEntity("block", 2, world.time + 1.3, 0)
+		hazard.thrown, hazard.phase = true, "waiting"
+		world.safeLeft = 1e9
+		world:Step(Tuning.step)
+		check("in a run at the top speed, a throw 1.3 s away has left the boss's hand",
+			world.speed == top and hazard.phase == "flying" and hazard.y > boss.throwMax, hazard.phase)
+	end
+
+	-- Layouts.
+	local function Find(name)
+		for _, pattern in ipairs(Patterns.LIST) do
+			if pattern.name == name then
+				return pattern
+			end
+		end
+	end
+	local unlocks, plain = {}, {}
+	for _, pattern in ipairs(Patterns.LIST) do
+		unlocks[pattern.minZone] = true
+		if not pattern.needsDuck then
+			plain[pattern.minZone] = true
+		end
+	end
+	local every, everyPlain = true, true
+	for _, zone in ipairs({ 6, 7, 8, 9, 10, 12 }) do
+		every = every and unlocks[zone] == true
+		everyPlain = everyPlain and plain[zone] == true
+	end
+	check("new layouts unlock in each of zones 6 to 10, and in zone 12", every)
+	check("for a player with ducking off too", everyPlain)
+	local easy = Find("coinLine")
+	check("an easy layout is a third as likely from the zone it turns rare in",
+		easy.rareFrom and near(Patterns.Weight(easy, nil, easy.rareFrom - 1), easy.weight) and near(Patterns.Weight(easy, nil, easy.rareFrom), easy.weight / 3))
+	check("the power-up layout never turns rare", Find("powerup").rareFrom == nil)
+	local function EasyShare(zone)
+		local rng = ns.Random.New(77)
+		local picks = 0
+		for _ = 1, 4000 do
+			if Patterns.Pick(rng, zone, true).rareFrom then
+				picks = picks + 1
+			end
+		end
+		return picks / 4000
+	end
+	local early, lateShare = EasyShare(6), EasyShare(14)
+	check("so the late zones are mostly the harder layouts", lateShare < early / 2 and lateShare < 0.2, ("%.2f of picks in zone 6, %.2f in zone 14"):format(early, lateShare))
+
+	-- A boss's throw of the tightest layouts may leave no spot for a spear.
+	-- Once a throw has left out spears it should have had, the next are only
+	-- layouts that leave one, so a late fight still offers enough.
+	do
+		local world = World.New(1, copy(Tuning), {})
+		world.spearStretch = 1
+		local function Room(name)
+			return world:SpearRoom(Find(name), Tuning.tempoMin, Tuning.gapMin, 1)
+		end
+		check("the tightest layouts leave no spot for a spear and easier ones do",
+			not Room("pillars") and not Room("staircase") and Room("blockWeave") and Room("highBar"))
+		-- Fights from zone 12 on, in short zones so there are several.
+		local short = copy(Tuning)
+		short.zoneLength = 15
+		local fights, lacking = 0, {}
+		for seed = 1, 2 do
+			local fought = World.New(seed, copy(short), {})
+			local spears, current = {}, nil
+			local realAdd = fought.AddEntity
+			fought.AddEntity = function(self, role, ...)
+				if role == "spear" and current then
+					current.spears = current.spears + 1
+				end
+				return realAdd(self, role, ...)
+			end
+			while fought.time < 420 do
+				fought.safeLeft = 1e9
+				fought:Step(0.1)
+				for _, event in ipairs(fought:DrainEvents()) do
+					if event.type == "bossStart" then
+						current = { zone = fought.boss.zone, needed = event.needed, spears = 0 }
+					elseif event.type == "bossEnd" and current then
+						if current.zone >= 12 then
+							fights = fights + 1
+							if current.spears < current.needed then
+								lacking[#lacking + 1] = ("seed %d zone %d: %d for %d"):format(seed, current.zone, current.spears, current.needed)
+							end
+						end
+						current = nil
+					end
+				end
+			end
+		end
+		check("every fight from zone 12 on offers enough spears", fights >= 3 and #lacking == 0,
+			("%d fights; %s"):format(fights, table.concat(lacking, ", ")))
+	end
+	-- An Alliance jogger that finds no clear lane after a chunk waits for the
+	-- next gap, so they come as often among the tightest layouts.
+	do
+		local tuning = copy(Tuning)
+		tuning.alliance = { chance = 1, minZone = 1, speedShare = 0.45 }
+		local world = World.New(5, tuning, { bosses = false })
+		world.entities = {}
+		local function Joggers()
+			local count = 0
+			for _, entity in ipairs(world.entities) do
+				count = count + (entity.role == "alliance" and 1 or 0)
+			end
+			return count
+		end
+		local wall = { { t = 1.8, lane = 1, code = "B" }, { t = 1.8, lane = 2, code = "B" }, { t = 1.8, lane = 3, code = "B" } }
+		world:SpawnAlliance(wall, world.time, world.time + 2, 1)
+		local held = Joggers() == 0 and world.allianceWaiting
+		world.tuning.alliance.chance = 0
+		world:SpawnAlliance({}, world.time, world.time + 5, 1)
+		check("an Alliance jogger with no clear lane waits for the next gap, whatever its chance", held and Joggers() == 1 and not world.allianceWaiting)
+	end
+
+	-- The bot plays each layout on its own, at the top speed and the tightest
+	-- spacing, one way round and then the other.
+	do
+		local pick = Patterns.Pick
+		local stuck = {}
+		for _, pattern in ipairs(Patterns.LIST) do
+			if Patterns.HasHazard(pattern) then
+				local flip = false
+				Patterns.Pick = function()
+					flip = not flip
+					return pattern, flip
+				end
+				local played = PlayBot(7, copy(topTuning), 8, nil, { "mulgore", "mulgore" })
+				if played.over then
+					stuck[#stuck + 1] = ("%s (%s at %.1fs)"):format(pattern.name, tostring(played.crashRole), played.time)
+				end
+			end
+		end
+		Patterns.Pick = pick
+		check("the bot gets through every layout at the top speed and the tightest spacing, either way round", #stuck == 0, table.concat(stuck, ", "))
+	end
+	-- And whole runs that start there: every zone's twist and the bosses.
+	for seed = 1, 2 do
+		local tuning = copy(topTuning)
+		tuning.twists.darnassus = nil
+		local played = PlayBot(seed, tuning, 100)
+		check(("bot survives a run at the top speed from the start, seed %d"):format(seed), not played.over,
+			("crashed into %s at %.1fs in zone %d"):format(tostring(played.crashRole), played.time, played.zoneIndex))
+	end
+
+	-- Stragglers.
+	local straggler = Tuning.straggler
+	check("no stragglers before their zone, then more each zone up to a cap",
+		Rules.StragglerChance(Tuning, straggler.from - 1) == 0 and near(Rules.StragglerChance(Tuning, straggler.from), straggler.chance)
+			and Rules.StragglerChance(Tuning, straggler.from + 1) > straggler.chance and Rules.StragglerChance(Tuning, 100) == straggler.max)
+	-- By the numbers: half the shortest gap before one is time to step out of
+	-- its lane, and what follows is time to cross the road, or to come down
+	-- from a jump over it and jump again.
+	local reaction = Patterns.LIMITS.reaction
+	local function Roomy(spacing, laneChange, jump)
+		local move = laneChange + reaction
+		return Tuning.gapMin / 2 * spacing >= move and (Tuning.gapMin / 2 + straggler.extra) * spacing >= math.max(2 * move, jump + 0.05)
+	end
+	check("a straggler leaves time to step out of its lane, and then to cross the road or jump again",
+		Roomy(1, Tuning.laneChangeTime, 2 * Tuning.jumpSpeed / Tuning.gravity))
+	for key, twist in pairs(Tuning.twists) do
+		if twist.spacing then
+			check(key .. ": and with that zone's lane changes and jumps",
+				Roomy(twist.spacing, twist.laneChange or Tuning.laneChangeTime, 2 * (twist.jumpSpeed or Tuning.jumpSpeed) / (twist.gravity or Tuning.gravity)))
+		end
+	end
+	-- Everything that asks something of you in an untouchable run, and its pits.
+	local function Road(seed, tuning, seconds, zones)
+		local world = World.New(seed, tuning, { bosses = false, zones = zones, recordTimeline = true })
+		local seen, hazards, pits = {}, {}, {}
+		while world.time < seconds do
+			world.safeLeft = 1e9
+			world:Step(0.1)
+			world:DrainEvents()
+			for _, entity in ipairs(world.entities) do
+				if not seen[entity.id] then
+					seen[entity.id] = true
+					if Rules.OBSTACLE[entity.role] then
+						hazards[#hazards + 1] = { arrive = entity.arrive, role = entity.role, straggler = entity.straggler }
+					elseif entity.role == "pit" then
+						pits[#pits + 1] = { arrive = entity.arrive, leave = entity.leave }
+					end
+				end
+			end
+		end
+		return world, hazards, pits
+	end
+	local function Count(list, test)
+		local count = 0
+		for _, item in ipairs(list) do
+			if test(item) then
+				count = count + 1
+			end
+		end
+		return count
+	end
+	local function IsStraggler(hazard)
+		return hazard.straggler
+	end
+	-- In an ordinary run: none before their zone, some after.
+	do
+		local _, hazards = Road(5, copy(Tuning), 13 * L)
+		local soon = Count(hazards, function(hazard)
+			return hazard.straggler and Rules.ZoneIndex(Tuning, hazard.arrive) < straggler.from
+		end)
+		check("stragglers turn up from their zone on, and never sooner", soon == 0 and Count(hazards, IsStraggler) > 3,
+			("%d too soon, %d in all"):format(soon, Count(hazards, IsStraggler)))
+	end
+	-- With one after every chunk that can have one, from the start.
+	local eager = copy(Tuning)
+	eager.straggler = { from = 1, chance = 1, perZone = 0, max = 1, extra = straggler.extra }
+	for _, duck in ipairs({ true, false }) do
+		local tuning = copy(eager)
+		tuning.duckEnabled = duck
+		local world, hazards, pits = Road(11, tuning, 120, { "mulgore", "mulgore" })
+		local label = duck and "" or " (ducking off)"
+		local crowded, afterPit = 0, 0
+		for _, hazard in ipairs(hazards) do
+			if hazard.straggler then
+				local gap = Rules.Gap(Tuning, Rules.ZoneIndex(Tuning, hazard.arrive))
+				for _, other in ipairs(hazards) do
+					if other ~= hazard and other.arrive > hazard.arrive - gap / 2 + 1e-6 and other.arrive < hazard.arrive + gap / 2 + straggler.extra - 1e-6 then
+						crowded = crowded + 1
+					end
+				end
+				for _, pit in ipairs(pits) do
+					if hazard.arrive > pit.arrive and hazard.arrive < pit.leave + 1 then
+						afterPit = afterPit + 1
+					end
+				end
+			end
+		end
+		local count = Count(hazards, IsStraggler)
+		check("a straggler has half a gap of clear road before it and its extra after" .. label, count > 20 and crowded == 0, ("%d stragglers, %d crowded"):format(count, crowded))
+		check("no straggler follows a pit" .. label, #pits > 0 and afterPit == 0, ("%d pits, %d followed"):format(#pits, afterPit))
+		local bars = Count(hazards, function(hazard) return hazard.straggler and hazard.role == "high" end)
+		local lows = Count(hazards, function(hazard) return hazard.straggler and hazard.role == "low" end)
+		local blocks = Count(hazards, function(hazard) return hazard.straggler and hazard.role == "block" end)
+		check("a straggler is something to jump, duck or step round" .. label, lows > 0 and blocks > 0 and (bars > 0) == duck and lows + blocks + bars == count,
+			("%d to jump, %d to duck, %d to step round"):format(lows, bars, blocks))
+		SortByTime(world.timeline)
+		local ok, at = Patterns.Feasible(world.timeline, tuning)
+		check("a road with a straggler after every chunk can be passed" .. label, ok, at)
+	end
+	do
+		local _, hazards = Road(11, copy(eager), 90, { "thousandneedles", "thousandneedles" })
+		check("there are no stragglers in a crosswind", #hazards > 10 and Count(hazards, IsStraggler) == 0, Count(hazards, IsStraggler))
+	end
+	-- And the bot gets past them at the top speed, on ice and in moonlight too.
+	local hot = copy(topTuning)
+	hot.straggler = eager.straggler
+	for _, key in ipairs({ "mulgore", "winterspring", "moonglade" }) do
+		local played = PlayBot(9, copy(hot), 40, nil, { key, key })
+		check(("bot gets past a straggler after every chunk in %s, at the top speed"):format(key), not played.over,
+			("crashed into %s at %.1fs in zone %d"):format(tostring(played.crashRole), played.time, played.zoneIndex))
 	end
 end
 

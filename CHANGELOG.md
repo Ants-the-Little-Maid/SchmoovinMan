@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.13.0 (2026-11-18)
+
+- Thousand Needles: the crosswind now carries you a whole lane over whenever you're in the air: on a jump, off a ramp, and on the drop after a Wind Rider. It blows you the way the streaks and the gauge show, slowly at first, so you're still over what you jumped, and you land in the next lane. At the road's edge it has nowhere to take you. Lane changes still work in the air, so you can steer against it. Hazards there are only ever laid so that there's a way through with the wind as it is, and nothing to jump, and no ramp, arrives just after the wind turns. Coins over a pit follow the way you'll be blown.
+- Wind Rider: the wyvern flies right under you, where it used to hang about two yards below. You sit at its wing roots, with its body and tail behind you, and the camera looks a little lower in flight so the wyvern is in view.
+- Winterspring: the icy road looks and feels like ice. A lane change on the ground slides about a quarter of a lane past the middle of the lane and comes back, throwing up a spray of ice and leaving scraped lines on the road, and the road has glints of ice on it. The slide stops short of anything in the next lane, so it doesn't change what you hit or pick up. A lane change made in the air lands without a slide, and one you turn back from partway slides only a little.
+- Your character's lean into a lane change is the same at any frame rate. It used to lean further at low frame rates and could twitch above 120 frames a second.
+- The top speed is 48 yards a second, up from 38. With 25-second zones and the Normal start you now keep speeding up until zone 14; it used to stop in zone 10.
+- Twelve new layouts for the later zones, two unlocking in each of zones 6 to 10 and two more in zone 12: tight weaves between blocks and walls with coins showing the way through, waves of chargers, and runs that string jumps, ducks and lane changes together. Four of them need ducking; with ducking off there's still a new one in each of those zones. A boss that falls behind on spears throws only layouts that leave room for one, so a late fight still offers enough to drive it off.
+- The easiest layouts turn up a third as often from zone 7, and the next easiest from zone 9, so the later zones are mostly the harder ones.
+- From zone 8, the gap after a group of hazards sometimes holds one more obstacle on its own, to jump, duck or step round: one gap in five in zone 8, rising to one in two by zone 14. There's always time to step out of its lane, and clear road after it.
+- Once you're running faster than 38 yards a second, bosses stand further up the road and the Horde leaders run further ahead, so a boss's throws and a leader's gifts land as long before they reach you as they did at 38.
+- Silithus: at those speeds a sandstorm gust pulls the fog in less, so there's always more than a second of road in sight.
+
 ## 0.12.2 (2026-11-13)
 
 0.12.1 was tagged but never released, so its changes are all here.
