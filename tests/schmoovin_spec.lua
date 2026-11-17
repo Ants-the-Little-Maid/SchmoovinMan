@@ -229,12 +229,16 @@ end
 
 local ROLE_CODE = { low = "L", high = "H", block = "B", wall = "B", charger = "B", tauren = "B", pitedge = "B", vent = "B" }
 
--- Lane of the planned path at the first row still ahead.
-local function NextLane(states, startState, now)
+-- Lane of the planned path at the first row still ahead. `rows`, if given,
+-- is filled with the lane the path is in at each row, by its time.
+local function NextLane(states, startState, now, rows)
 	local path = {}
 	local state = states[1]
 	while state and state ~= startState do
 		table.insert(path, 1, state)
+		if rows then
+			rows[state.t] = state.at or state.lane
+		end
 		state = state.parent
 	end
 	for _, step in ipairs(path) do
@@ -259,6 +263,8 @@ local function PlayBot(seed, tuning, seconds, mode, zones)
 	local lastJump, lastDuck = -1000, -1000
 	local target = runner.lane
 	local planTimer = 0
+	-- The lane the plan is in at each row ahead, by its time.
+	local planRows = {}
 	while world.time < seconds and not world.over do
 		planTimer = planTimer - tuning.step
 		-- In a crosswind, a jump under way is left to the wind until what was
@@ -314,14 +320,16 @@ local function PlayBot(seed, tuning, seconds, mode, zones)
 				SortByTime(withSpear)
 				local ok, states = Patterns.Feasible(withSpear, tuning, { start })
 				if ok then
-					target = NextLane(states, start, world.time) or target
+					planRows = {}
+					target = NextLane(states, start, world.time, planRows) or target
 					planned = true
 				end
 			end
 			if not planned then
 				local ok, states = Patterns.Feasible(items, tuning, { start })
 				if ok and #items > 0 then
-					target = NextLane(states, start, world.time) or target
+					planRows = {}
+					target = NextLane(states, start, world.time, planRows) or target
 				end
 			end
 		end
@@ -342,7 +350,10 @@ local function PlayBot(seed, tuning, seconds, mode, zones)
 			-- Judge by position, not the chosen lane: a lane change takes time.
 			local overlaps = shape and (entity.lane == runner.lane or math.abs(entity.x - runner.x) < shape.halfWidth + tuning.runnerHalfWidth + 0.3)
 			if overlaps and not entity.smashed and untilArrive > 0 then
-				if code == "L" and untilArrive <= 0.36 and runner.z == 0 and not runner.flying then
+				-- In a crosswind, only something the plan jumps: a jump it didn't plan
+				-- may blow it into a lane it means to keep out of.
+				local windy = entity.wind and planRows[entity.arrive] ~= entity.lane
+				if code == "L" and untilArrive <= 0.36 and runner.z == 0 and not runner.flying and not windy then
 					world:Input("jump")
 					lastJump = entity.arrive
 				-- (Ducking again if the duck under way would end before this bar is

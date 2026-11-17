@@ -356,7 +356,14 @@ do
 	end
 	assert(hud.boss.lastAlpha == 1, "boss bar not showing after the banner: " .. tostring(hud.boss.lastAlpha))
 	print(("boss: %s, %d spears needed, up to %d landing marks"):format(world.boss.name, world.boss.needed, marks))
-	-- A spear grabbed is thrown at the boss.
+	-- A spear grabbed is thrown at the boss. (Only this one: the fight's own
+	-- spears are cleared, as one may be in the runner's lane meanwhile.)
+	for index = #world.entities, 1, -1 do
+		if world.entities[index].role == "spear" then
+			table.remove(world.entities, index)
+		end
+	end
+	world.boss.hits = 0
 	world:AddEntity("spear", world.runner.lane, world.time + 0.3, 0.9)
 	local shot = false
 	for _ = 1, 60 do
